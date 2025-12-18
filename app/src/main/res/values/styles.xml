@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Duplicate styles were moved into themes.xml to centralize theming.
+         This file intentionally left minimal to avoid resource merge conflicts. -->
+</resources>

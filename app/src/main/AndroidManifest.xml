@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.example.moniq">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application
+        android:allowBackup="true"
+        android:name=".MoniqApp"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Moniq">
+        
+        <!-- LoginActivity is now the launcher (first screen) -->
+        <activity
+            android:name=".LoginActivity"
+            android:exported="true"
+            android:label="@string/title_login"
+            android:theme="@style/Theme.Moniq">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        
+        <!-- MainActivity is no longer the launcher -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.Moniq" />
+            
+        <activity
+            android:name=".HomeActivity"
+            android:exported="false"
+            android:label="@string/title_home"
+            android:theme="@style/Theme.Moniq" />
+        <activity
+            android:name=".AlbumActivity"
+            android:exported="false"
+            android:label="@string/title_album"
+            android:theme="@style/Theme.Moniq" />
+        <activity
+            android:name=".ArtistActivity"
+            android:exported="false"
+            android:label="@string/title_artist"
+            android:theme="@style/Theme.Moniq" />
+        <activity
+            android:name=".SearchActivity"
+            android:exported="false"
+            android:label="Search"
+            android:theme="@style/Theme.Moniq" />
+        <activity
+            android:name=".FullscreenPlayerActivity"
+            android:exported="false"
+            android:label="Player"
+            android:theme="@style/Theme.Moniq" />
+            <activity android:name=".SettingsActivity" />
+        <activity android:name=".QueueActivity" />
+        <activity android:name=".PlaylistsActivity" android:exported="false" android:label="Playlists" android:theme="@style/Theme.Moniq" />
+        <activity android:name=".PlaylistDetailActivity" android:exported="false" android:label="Playlist" android:theme="@style/Theme.Moniq" />
+        <activity android:name=".NotificationSeekActivity" android:exported="false" android:label="Seek" android:theme="@style/Theme.MaterialComponents.DayNight.Dialog.Alert" />
+        <activity android:name=".RecentlyListActivity" android:exported="false" android:label="Recently Listened" android:theme="@style/Theme.Moniq" />
+        <receiver android:name=".player.NotificationActionReceiver" android:exported="false" />
+
+</application>
+</manifest>

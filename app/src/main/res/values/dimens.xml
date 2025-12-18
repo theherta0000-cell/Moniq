@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="padding_small">8dp</dimen>
+    <dimen name="album_art_size">64dp</dimen>
+    <dimen name="track_art_size">48dp</dimen>
+</resources>

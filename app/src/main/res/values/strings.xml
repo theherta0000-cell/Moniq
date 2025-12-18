@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Moniq</string>
+    <string name="notification_channel_name">Music playback</string>
+    <string name="notification_channel_description">Controls for playback and lock screen media</string>
+    <string name="title_login">Login</string>
+    <string name="title_home">Home</string>
+    <string name="title_album">Album</string>
+    <string name="title_artist">Artist</string>
+</resources>
