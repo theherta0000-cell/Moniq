@@ -181,7 +181,7 @@ class PlaylistsActivity : ComponentActivity() {
         val rv = androidx.recyclerview.widget.RecyclerView(this)
         rv.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
         val listAdapter = object: androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder>() {
-            var items = results
+            var items = results.toMutableList()
             override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): androidx.recyclerview.widget.RecyclerView.ViewHolder {
                 val v = layoutInflater.inflate(R.layout.item_import_result, parent, false)
                 return object: androidx.recyclerview.widget.RecyclerView.ViewHolder(v){}
@@ -205,37 +205,85 @@ class PlaylistsActivity : ComponentActivity() {
                 }
                 removeBtn.setOnClickListener {
                     try {
-                        entry.matched?.let { m -> manager.removeTrack(playlistId, m.id); adapter.update(manager.list()) }
+                        // remove matched track from playlist and update dialog + main UI
+                        val matched = entry.matched
+                        if (matched != null) {
+                            manager.removeTrack(playlistId, matched.id)
+                            // remove item from dialog list and notify
+                            val idx = holder.adapterPosition
+                            if (idx >= 0 && idx < items.size) {
+                                items.removeAt(idx)
+                                notifyItemRemoved(idx)
+                            }
+                            adapter.update(manager.list())
+                        }
                     } catch (_: Exception) {}
                 }
                 replaceBtn.setOnClickListener {
-                    // search for replacement
-                    lifecycleScope.launch {
+                    // allow user to search/edit query and choose a replacement
+                    (ctx as PlaylistsActivity).lifecycleScope.launch {
                         try {
-                            val repo = com.example.moniq.search.SearchRepository()
-                            val res = withContext(Dispatchers.IO) { repo.search(entry.originalQuery) }
-                            val songs = res.songs
-                            if (songs.isEmpty()) {
-                                runOnUiThread { android.widget.Toast.makeText(ctx, "No replacements found", android.widget.Toast.LENGTH_SHORT).show() }
-                                return@launch
-                            }
-                            val labels = songs.map { s -> if (!s.artist.isNullOrBlank()) "${s.title} — ${s.artist}" else s.title }.toTypedArray()
-                            val choice = kotlinx.coroutines.suspendCancellableCoroutine<Int?> { cont ->
-                                val dlg = MaterialAlertDialogBuilder(ctx)
-                                    .setTitle("Choose replacement for:\n${entry.originalQuery}")
-                                dlg.setItems(labels) { _, which -> cont.resume(which) {} }
-                                val d = dlg.show()
-                                cont.invokeOnCancellation { try { d.dismiss() } catch (_: Exception) {} }
-                            }
-                            if (choice == null) return@launch
-                            val sel = songs[choice]
-                            // perform replace: if matched existed, replace matched.id else just add new track
-                            withContext(Dispatchers.Main) {
-                                try {
-                                    if (entry.matched != null) manager.replaceTrack(playlistId, entry.matched.id, com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.durationSec, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
-                                    else manager.addTrack(playlistId, com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.durationSec, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
-                                    adapter.update(manager.list())
-                                } catch (_: Exception) {}
+                            var query = entry.originalQuery
+                            var songs = withContext(Dispatchers.IO) { com.example.moniq.search.SearchRepository().search(query).songs }
+                            selectionLoop@ while (true) {
+                                if (songs.isEmpty()) {
+                                    // prompt to edit query or cancel
+                                    val edit = android.widget.EditText(ctx)
+                                    edit.setText(query)
+                                    val ok = kotlinx.coroutines.suspendCancellableCoroutine<Boolean> { cont ->
+                                        MaterialAlertDialogBuilder(ctx)
+                                            .setTitle("No results for: $query")
+                                            .setView(edit)
+                                            .setPositiveButton("Search") { _, _ -> cont.resume(true) {} }
+                                            .setNegativeButton("Cancel", null)
+                                            .show()
+                                    }
+                                    if (!ok) break@selectionLoop
+                                    query = edit.text?.toString() ?: query
+                                    songs = withContext(Dispatchers.IO) { com.example.moniq.search.SearchRepository().search(query).songs }
+                                    continue@selectionLoop
+                                }
+                                val labels = songs.map { s -> if (!s.artist.isNullOrBlank()) "${s.title} — ${s.artist}" else s.title }.toTypedArray()
+                                val choice = kotlinx.coroutines.suspendCancellableCoroutine<Int?> { cont ->
+                                    val dlg = MaterialAlertDialogBuilder(ctx)
+                                        .setTitle("Choose replacement for:\n${entry.originalQuery}")
+                                    dlg.setItems(labels) { _, which -> cont.resume(which) {} }
+                                    dlg.setPositiveButton("Edit query") { _, _ -> cont.resume(-1) {} }
+                                    val d = dlg.show()
+                                    cont.invokeOnCancellation { try { d.dismiss() } catch (_: Exception) {} }
+                                }
+                                if (choice == null) break@selectionLoop
+                                if (choice == -1) {
+                                    val edit = android.widget.EditText(ctx)
+                                    edit.setText(query)
+                                    val ok = kotlinx.coroutines.suspendCancellableCoroutine<Boolean> { cont ->
+                                        MaterialAlertDialogBuilder(ctx)
+                                            .setTitle("Edit search")
+                                            .setView(edit)
+                                            .setPositiveButton("Search") { _, _ -> cont.resume(true) {} }
+                                            .setNegativeButton("Cancel", null)
+                                            .show()
+                                    }
+                                    if (!ok) break@selectionLoop
+                                    query = edit.text?.toString() ?: query
+                                    songs = withContext(Dispatchers.IO) { com.example.moniq.search.SearchRepository().search(query).songs }
+                                    continue@selectionLoop
+                                }
+                                val sel = songs[choice]
+                                withContext(Dispatchers.Main) {
+                                    try {
+                                        if (entry.matched != null) manager.replaceTrack(playlistId, entry.matched.id, com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.durationSec, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
+                                        else manager.addTrack(playlistId, com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.durationSec, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
+                                        // update dialog entry to show matched replacement
+                                        val idx = holder.adapterPosition
+                                        if (idx >= 0 && idx < items.size) {
+                                            items[idx] = items[idx].copy(matched = com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.durationSec, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
+                                            notifyItemChanged(idx)
+                                        }
+                                        adapter.update(manager.list())
+                                    } catch (_: Exception) {}
+                                }
+                                break@selectionLoop
                             }
                         } catch (e: Exception) { runOnUiThread { android.widget.Toast.makeText(ctx, "Replacement failed", android.widget.Toast.LENGTH_SHORT).show() } }
                     }

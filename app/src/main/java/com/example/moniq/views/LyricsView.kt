@@ -190,11 +190,38 @@ class LyricsView @JvmOverloads constructor(context: Context, attrs: AttributeSet
 
     fun setAccentColor(color: Int) {
         try {
-            accentColor = color
+            // ensure accent is readable against dark backgrounds: if luminance is too low,
+            // lighten the color slightly for better contrast
+            val safe = ensureReadableAccent(color)
+            accentColor = safe
             // refresh current styling
             if (focusedMode) setFocusedMode(true) else setFocusedMode(false)
             // also force re-highlight for current position
             if (currentIndex >= 0) updatePosition((lines.getOrNull(currentIndex)?.startMs ?: 0L))
         } catch (_: Exception) {}
+    }
+
+    private fun ensureReadableAccent(color: Int): Int {
+        try {
+            val r = ((color shr 16) and 0xff).toDouble()
+            val g = ((color shr 8) and 0xff).toDouble()
+            val b = (color and 0xff).toDouble()
+            // relative luminance per WCAG
+            fun channel(c: Double): Double {
+                val v = c / 255.0
+                return if (v <= 0.03928) v / 12.92 else Math.pow((v + 0.055) / 1.055, 2.4)
+            }
+            val lum = 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+            // target minimum luminance; if too dark, blend toward white
+            if (lum < 0.15) {
+                // blend factor to mix with white
+                val factor = ((0.15 - lum) / 0.15).coerceIn(0.12, 0.7)
+                val nr = (r + (255 - r) * factor).toInt().coerceIn(0,255)
+                val ng = (g + (255 - g) * factor).toInt().coerceIn(0,255)
+                val nb = (b + (255 - b) * factor).toInt().coerceIn(0,255)
+                return (0xFF shl 24) or (nr shl 16) or (ng shl 8) or nb
+            }
+        } catch (_: Exception) {}
+        return color
     }
 }

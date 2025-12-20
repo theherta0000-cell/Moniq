@@ -33,6 +33,10 @@ class QueueActivity : ComponentActivity() {
         recycler?.adapter = adapter
 
         // attach ItemTouchHelper for drag-to-reorder and swipe-to-remove
+        // Track drag start/end positions and only commit the change to the AudioPlayer when
+        // the drag completes to avoid interrupting ItemTouchHelper's drag operation.
+        var dragFrom = -1
+        var dragTo = -1
         val callback = object : ItemTouchHelper.SimpleCallback(
             ItemTouchHelper.UP or ItemTouchHelper.DOWN,
             ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT
@@ -45,10 +49,23 @@ class QueueActivity : ComponentActivity() {
                 val from = vh.adapterPosition
                 val to = target.adapterPosition
                 try {
+                    if (dragFrom == -1) dragFrom = from
+                    dragTo = to
                     adapter.moveItem(from, to)
-                    AudioPlayer.moveInQueue(from, to)
+                    // do NOT call AudioPlayer.moveInQueue here; defer until drag finished
                 } catch (_: Exception) {}
                 return true
+            }
+
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                try {
+                    if (dragFrom != -1 && dragTo != -1 && dragFrom != dragTo) {
+                        AudioPlayer.moveInQueue(dragFrom, dragTo)
+                    }
+                } catch (_: Exception) {}
+                dragFrom = -1
+                dragTo = -1
             }
 
             override fun onSwiped(vh: RecyclerView.ViewHolder, direction: Int) {

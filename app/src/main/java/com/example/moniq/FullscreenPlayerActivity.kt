@@ -13,6 +13,7 @@ import android.widget.Toast
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import com.google.android.material.slider.Slider
@@ -28,6 +29,7 @@ class FullscreenPlayerActivity : ComponentActivity() {
     private var sliderJob: Job? = null
     private var lyricsJob: Job? = null
     private var timeJob: Job? = null
+    private var lyricsFetchJob: Job? = null
 
     private fun loadLyricsIfNeeded(lyricsView: View?) {
         val title = AudioPlayer.currentTitle.value
@@ -37,15 +39,46 @@ class FullscreenPlayerActivity : ComponentActivity() {
         if (lyricsLoadedFor == "$title|$artist") return
         lyricsLoadedFor = "$title|$artist"
         lyricsClear(lyricsView)
-        lifecycleScope.launch {
-            val lines = com.example.moniq.network.LyricsFetcher.fetchLyrics(title, artist, null, durSec)
-            if (lines.isNotEmpty()) {
-                lyricsView?.visibility = View.VISIBLE
-                lyricsSetLines(lyricsView, lines)
-                // ensure view refreshes so lines become visible in cases where the view was measured before content
-                lyricsView?.post { try { lyricsView.visibility = View.VISIBLE } catch (_: Exception) {} }
-            } else {
-                lyricsView?.visibility = View.GONE
+
+        // show a cancellable progress dialog while fetching lyrics
+        val progressBar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleLarge)
+        progressBar.isIndeterminate = true
+        val container = android.widget.LinearLayout(this)
+        container.orientation = android.widget.LinearLayout.VERTICAL
+        container.setPadding(24,24,24,24)
+        container.addView(progressBar)
+        val dlg = com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle("Fetching lyrics...")
+            .setView(container)
+            .setNegativeButton("Cancel") { _, _ ->
+                try { lyricsFetchJob?.cancel() } catch (_: Exception) {}
+                lyricsLoadedFor = null
+            }
+            .setCancelable(false)
+            .show()
+
+        lyricsFetchJob = lifecycleScope.launch {
+            try {
+                val lines = withContext(Dispatchers.IO) { com.example.moniq.network.LyricsFetcher.fetchLyrics(title, artist, null, durSec) }
+                if (lines.isNotEmpty()) {
+                    lyricsView?.visibility = View.VISIBLE
+                    lyricsSetLines(lyricsView, lines)
+                    // ensure view refreshes so lines become visible in cases where the view was measured before content
+                    lyricsView?.post { try { lyricsView.visibility = View.VISIBLE } catch (_: Exception) {} }
+                } else {
+                    lyricsView?.visibility = View.GONE
+                    runOnUiThread { android.widget.Toast.makeText(this@FullscreenPlayerActivity, "No lyrics found", android.widget.Toast.LENGTH_SHORT).show() }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) {
+                    // user cancelled
+                } else {
+                    runOnUiThread { android.widget.Toast.makeText(this@FullscreenPlayerActivity, "Lyrics fetch failed", android.widget.Toast.LENGTH_SHORT).show() }
+                    lyricsLoadedFor = null
+                }
+            } finally {
+                try { dlg.dismiss() } catch (_: Exception) {}
+                lyricsFetchJob = null
             }
         }
     }

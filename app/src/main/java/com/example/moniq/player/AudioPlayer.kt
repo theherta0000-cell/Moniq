@@ -179,8 +179,11 @@ object AudioPlayer {
                             .setSmallIconResourceId(R.mipmap.ic_launcher)
                             .setMediaDescriptionAdapter(adapter)
             playerNotificationManager = builder.build()
-            // Attach the ExoPlayer so PlayerNotificationManager can manage media notification artwork
-            try { playerNotificationManager?.setPlayer(player) } catch (_: Exception) {}
+            // NOTE: we intentionally DO NOT attach the ExoPlayer to PlayerNotificationManager here
+            // to avoid PlayerNotificationManager posting its own notification which conflicted
+            // with our custom notification and caused the brief/vanishing notification bug.
+            // We keep the manager instance for potential future use but do not call setPlayer().
+            try { /* Intentionally not attaching playerNotificationManager to player */ } catch (_: Exception) {}
             // Post our custom notification immediately
             try {
                 postCustomNotification()
@@ -318,6 +321,7 @@ object AudioPlayer {
                                     .apply {
                                         if (!tr.title.isNullOrEmpty()) setTitle(tr.title)
                                         if (!tr.artist.isNullOrEmpty()) setArtist(tr.artist)
+                                        if (!tr.albumName.isNullOrBlank()) setAlbumTitle(tr.albumName)
                                         val coverId = tr.coverArtId ?: tr.albumId ?: tr.id
                                         if (!coverId.isNullOrEmpty()) {
                                             if (coverId.startsWith("http")) {

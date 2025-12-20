@@ -113,6 +113,8 @@ class TrackAdapter(
                                             val it = android.content.Intent(ctx, com.example.moniq.ArtistActivity::class.java)
                                             it.putExtra("artistId", match.id)
                                             it.putExtra("artistName", match.name)
+                                            // pass cover id when available to help ArtistActivity render header quickly
+                                            match.coverArtId?.let { c -> it.putExtra("artistCoverId", c) }
                                             it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                                             android.os.Handler(android.os.Looper.getMainLooper()).post { ctx.startActivity(it) }
                                         } else {
