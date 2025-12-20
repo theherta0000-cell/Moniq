@@ -29,7 +29,7 @@
         android:textSize="12sp"
         android:maxLines="2"
         android:ellipsize="end"
-        android:textColor="#2D3748"
+        android:textColor="?android:attr/textColorPrimary"
         android:layout_marginTop="6dp" />
 
     <TextView
@@ -39,7 +39,7 @@
         android:textSize="11sp"
         android:maxLines="1"
         android:ellipsize="end"
-        android:textColor="#718096" />
+        android:textColor="?android:attr/textColorSecondary" />
 
     <TextView
         android:id="@+id/albumDuration"

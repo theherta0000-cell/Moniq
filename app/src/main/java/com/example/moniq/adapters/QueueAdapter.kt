@@ -51,18 +51,24 @@ class QueueAdapter(private var items: List<Track>, private val callbacks: Callba
         val t = items[position]
         holder.title.text = t.title
         holder.artist.text = t.artist
-        // load cover art into queue item
+        // load cover art into queue item (support full URIs or server-side cover IDs)
         try {
             val host = com.example.moniq.SessionManager.host
             val coverId = t.coverArtId ?: t.albumId ?: t.id
-            if (!coverId.isNullOrBlank() && host != null) {
-                val coverUri = android.net.Uri.parse(host).buildUpon()
+            val coverSrc: String? = when {
+                coverId.isNullOrBlank() -> null
+                coverId.startsWith("http://") || coverId.startsWith("https://") -> coverId
+                coverId.startsWith("content://") || coverId.startsWith("file://") -> coverId
+                host != null -> android.net.Uri.parse(host).buildUpon()
                     .appendPath("rest").appendPath("getCoverArt.view")
                     .appendQueryParameter("id", coverId)
                     .appendQueryParameter("u", com.example.moniq.SessionManager.username ?: "")
                     .appendQueryParameter("p", com.example.moniq.SessionManager.password ?: "")
                     .build().toString()
-                holder.cover?.load(coverUri) { placeholder(R.drawable.ic_album); crossfade(true) }
+                else -> null
+            }
+            if (!coverSrc.isNullOrBlank()) {
+                holder.cover?.load(coverSrc) { placeholder(R.drawable.ic_album); crossfade(true) }
             } else {
                 holder.cover?.setImageResource(R.drawable.ic_album)
             }

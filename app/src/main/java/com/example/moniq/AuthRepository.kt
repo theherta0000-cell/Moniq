@@ -32,7 +32,8 @@ class AuthRepository {
                 val body = resp.body() ?: ""
 
                 val isHttpOk = resp.isSuccessful
-                val hasOkStatus = body.contains("status=\"ok\"") || body.contains("status='ok'")
+                // Support both XML and JSON ping responses. JSON may contain "status":"ok".
+                val hasOkStatus = body.contains("status=\"ok\"") || body.contains("status='ok'") || body.contains("\"status\":\"ok\"")
 
                 withContext(Dispatchers.Main) {
                     if (isHttpOk && hasOkStatus) {
@@ -82,6 +83,16 @@ class AuthRepository {
     }
 
     private fun parseErrorFromBody(body: String): String? {
+        // Try JSON first: look for "message" or "error" fields
+        try {
+            val jsonRegex = Regex("""\"message\"\s*:\s*\"([^\"]*)\"|\"error\"\s*:\s*\"([^\"]*)\"""")
+            val jm = jsonRegex.find(body)
+            if (jm != null) {
+                return jm.groups[1]?.value ?: jm.groups[2]?.value
+            }
+        } catch (_: Exception) {}
+
+        // Try simple XML attributes like message="..." or message='...'
         val regex = Regex("message=(?:\"([^\"]*)\"|'([^']*)')")
         val match = regex.find(body)
         if (match != null) {
@@ -89,6 +100,8 @@ class AuthRepository {
             val g2 = match.groups[2]?.value
             return g1 ?: g2
         }
+
+        // Try <error> inner text in XML
         if (body.contains("status=\"failed\"") || body.contains("status='failed'")) {
             val inner = Regex("<error[^>]*>(.*?)</error>", RegexOption.DOT_MATCHES_ALL).find(body)
             if (inner != null) return inner.groups[1]?.value?.trim()

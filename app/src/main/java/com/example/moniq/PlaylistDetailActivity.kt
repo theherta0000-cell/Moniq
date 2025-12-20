@@ -40,17 +40,10 @@ class PlaylistDetailActivity : ComponentActivity() {
         val clearCoverBtn = findViewById<android.widget.Button>(R.id.clearCoverButton)
         val chooseCoverBtn = findViewById<android.widget.Button>(R.id.chooseCoverButton)
 
-        // add a low-opacity Edit action in the toolbar to reveal controls
-        val editMenu = toolbar.menu.add("Edit")
-        editMenu.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
-        editMenu.setIcon(android.R.drawable.ic_menu_edit)
-        val editItemView = toolbar.findViewById<android.view.View?>(editMenu.itemId)
-        // start semi-transparent
-        editMenu.icon?.alpha = (0.35f * 255).toInt()
-        var controlsVisible = false
-        editMenu.setOnMenuItemClickListener {
-            togglePlaylistControls()
-            true
+        // Use an inline toggle button to reveal/hide cover-edit controls
+        val toggleEditBtn = findViewById<android.widget.ImageButton>(R.id.toggleEditButton)
+        toggleEditBtn?.setOnClickListener {
+            toggleCoverEditControls()
         }
 
         var pickImageLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>? = null
@@ -194,6 +187,13 @@ class PlaylistDetailActivity : ComponentActivity() {
 
         load(adapter)
 
+        // Ensure playback controls are visible and interactive (fix touch/inaccessibility bug)
+        val playlistControls = findViewById<android.view.View>(R.id.playlistControls)
+        playlistControls?.visibility = android.view.View.VISIBLE
+        findViewById<android.widget.Button>(R.id.playAllButton)?.apply { alpha = 1.0f; isEnabled = true }
+        findViewById<android.widget.Button>(R.id.shuffleButton)?.apply { alpha = 1.0f; isEnabled = true }
+        findViewById<android.widget.Button>(R.id.addByIdButton)?.apply { alpha = 1.0f; isEnabled = true }
+
         saveBtn.setOnClickListener {
             val p = playlistId?.let { manager.get(it) } ?: return@setOnClickListener
             val newName = nameInput.text?.toString() ?: ""
@@ -277,16 +277,17 @@ class PlaylistDetailActivity : ComponentActivity() {
         return Uri.fromFile(outFile).toString()
     }
 
-    private fun togglePlaylistControls() {
-        val controls = findViewById<android.view.View>(R.id.playlistControls) ?: return
-        val isRevealed = controls.alpha > 0.5f
-        if (isRevealed) {
-            controls.animate().alpha(0.15f).setDuration(200).withEndAction {
+    private fun toggleCoverEditControls() {
+        val container = findViewById<android.view.View>(R.id.coverEditControls) ?: return
+        if (container.visibility == android.view.View.VISIBLE) {
+            container.animate().alpha(0.0f).setDuration(150).withEndAction {
+                container.visibility = android.view.View.GONE
                 setControlsEnabled(false)
             }
         } else {
-            controls.visibility = android.view.View.VISIBLE
-            controls.animate().alpha(1.0f).setDuration(200).withEndAction {
+            container.alpha = 0.0f
+            container.visibility = android.view.View.VISIBLE
+            container.animate().alpha(1.0f).setDuration(150).withEndAction {
                 setControlsEnabled(true)
             }
         }

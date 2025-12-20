@@ -114,20 +114,20 @@ class TrackAdapter(
                                             it.putExtra("artistId", match.id)
                                             it.putExtra("artistName", match.name)
                                             it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            ctx.startActivity(it)
+                                            android.os.Handler(android.os.Looper.getMainLooper()).post { ctx.startActivity(it) }
                                         } else {
                                             val it = android.content.Intent(ctx, com.example.moniq.SearchActivity::class.java)
                                             it.putExtra("query", t.artist)
                                             it.putExtra("filter", "ARTISTS")
                                             it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            ctx.startActivity(it)
+                                            android.os.Handler(android.os.Looper.getMainLooper()).post { ctx.startActivity(it) }
                                         }
                                     } catch (_: Exception) {
                                         val it = android.content.Intent(ctx, com.example.moniq.SearchActivity::class.java)
                                         it.putExtra("query", t.artist)
                                         it.putExtra("filter", "ARTISTS")
                                         it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        ctx.startActivity(it)
+                                        android.os.Handler(android.os.Looper.getMainLooper()).post { ctx.startActivity(it) }
                                     }
                                 }
                             } catch (_: Exception) {

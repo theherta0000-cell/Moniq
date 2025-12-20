@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatDelegate
 import com.google.android.material.slider.Slider
 import android.widget.TextView
 import com.example.moniq.player.AudioPlayer
@@ -25,6 +26,14 @@ class SettingsActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Apply saved theme mode on startup
+        try {
+            when (com.example.moniq.SessionStore.loadThemeMode(this, 0)) {
+                1 -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
+                2 -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
+                else -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
+            }
+        } catch (_: Exception) {}
         setContentView(R.layout.activity_settings)
 
         val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.settingsToolbar)
@@ -67,6 +76,26 @@ class SettingsActivity : ComponentActivity() {
         chooseButton.setOnClickListener {
             pickDirLauncher.launch(null)
         }
+
+        // Theme toggle: cycles System -> Light -> Dark
+        val themeBtn = findViewById<android.widget.Button>(R.id.settings_theme_button)
+        fun modeLabel(m: Int): String = when (m) { 1 -> "Light"; 2 -> "Dark"; else -> "System" }
+        try {
+            var mode = com.example.moniq.SessionStore.loadThemeMode(this, 0)
+            themeBtn.text = modeLabel(mode)
+            themeBtn.setOnClickListener {
+                mode = ((mode + 1) % 3)
+                com.example.moniq.SessionStore.saveThemeMode(this, mode)
+                themeBtn.text = modeLabel(mode)
+                try {
+                    when (mode) {
+                        1 -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
+                        2 -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
+                        else -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
+                    }
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
     }
 
     private fun updateDownloadValue(uriString: String?) {

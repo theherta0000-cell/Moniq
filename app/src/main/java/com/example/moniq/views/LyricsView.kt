@@ -30,6 +30,7 @@ class LyricsView @JvmOverloads constructor(context: Context, attrs: AttributeSet
     private val textViews = mutableListOf<TextView>()
     private var currentIndex = -1
     private var focusedMode = false
+    private var accentColor: Int = try { context.getColor(com.example.moniq.R.color.purple_700) } catch (_: Exception) { Color.MAGENTA }
 
     init {
         addView(container)
@@ -83,7 +84,7 @@ class LyricsView @JvmOverloads constructor(context: Context, attrs: AttributeSet
         for ((i, tv) in textViews.withIndex()) {
             if (enabled) {
                 tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, if (i == currentIndex) 32f else 18f)
-                tv.setTextColor(if (i == currentIndex) context.getColor(R.color.purple_700) else Color.LTGRAY)
+                tv.setTextColor(if (i == currentIndex) accentColor else Color.LTGRAY)
             } else {
                 tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
                 tv.setTextColor(Color.LTGRAY)
@@ -119,15 +120,12 @@ class LyricsView @JvmOverloads constructor(context: Context, attrs: AttributeSet
             cur.setTextColor(context.getColor(R.color.purple_700))
             // apply per-syllable highlight for this line
             highlightSyllable(currentIndex, posMs)
-            if (focusedMode) {
-                // center this view in scroll
-                post {
-                    val target = cur.top - height/2 + cur.height/2
-                    smoothScrollTo(0, target.coerceAtLeast(0))
-                }
-            } else {
-                // ensure visible
-                post { smoothScrollTo(0, cur.top.coerceAtLeast(0)) }
+            // always center the active line for better focus
+            post {
+                val target = (cur.top - height / 2 + cur.height / 2).coerceAtLeast(0)
+                // immediate scroll to ensure the active line is centered; fallback to smooth scroll
+                scrollTo(0, target)
+                postDelayed({ smoothScrollTo(0, target) }, 120)
             }
         }
     }
@@ -148,7 +146,7 @@ class LyricsView @JvmOverloads constructor(context: Context, attrs: AttributeSet
         }
         if (sIdx == -1 && posMs >= li.endMs) sIdx = li.syllables.size - 1
 
-        val fullColor = context.getColor(R.color.purple_700)
+        val fullColor = accentColor
         val baseColor = Color.LTGRAY
 
         // color earlier syllables fully, current syllable partially (blend), later syllables base color
@@ -188,5 +186,15 @@ class LyricsView @JvmOverloads constructor(context: Context, attrs: AttributeSet
         val G = (aG * inverse + bG * ratio).toInt() and 0xff
         val B = (aB * inverse + bB * ratio).toInt() and 0xff
         return (A shl 24) or (R shl 16) or (G shl 8) or B
+    }
+
+    fun setAccentColor(color: Int) {
+        try {
+            accentColor = color
+            // refresh current styling
+            if (focusedMode) setFocusedMode(true) else setFocusedMode(false)
+            // also force re-highlight for current position
+            if (currentIndex >= 0) updatePosition((lines.getOrNull(currentIndex)?.startMs ?: 0L))
+        } catch (_: Exception) {}
     }
 }

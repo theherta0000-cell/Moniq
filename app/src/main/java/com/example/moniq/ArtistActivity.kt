@@ -55,7 +55,6 @@ class ArtistActivity : ComponentActivity() {
         val trackAdapter = com.example.moniq.adapters.TrackAdapter(emptyList(), onPlay = { t, pos -> AudioPlayer.playTrack(this, t.id, t.title, t.artist, t.coverArtId) }, onDownload = { /* no-op */ })
         popularSongsRecycler?.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
         popularSongsRecycler?.adapter = trackAdapter
-        popularSongsRecycler?.setHasFixedSize(true)
 
         // populate random sample tracks
         val sampleTitles = listOf("Thinkin Bout You","Provider","Pink + White","Nikes","Ivy","Seigfried")

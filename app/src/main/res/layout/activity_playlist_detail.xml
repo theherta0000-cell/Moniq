@@ -29,7 +29,15 @@
             android:layout_weight="1"
             android:orientation="vertical"
             android:paddingStart="8dp">
-
+            
+            <ImageButton
+                android:id="@+id/toggleEditButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="end"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_menu_edit"
+                android:contentDescription="Toggle edit" />
             <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content">
@@ -51,9 +59,11 @@
             </com.google.android.material.textfield.TextInputLayout>
 
             <LinearLayout
+                android:id="@+id/coverEditControls"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal">
+                android:orientation="horizontal"
+                android:visibility="gone">
                 <Button
                     android:id="@+id/chooseCoverButton"
                     android:layout_width="wrap_content"

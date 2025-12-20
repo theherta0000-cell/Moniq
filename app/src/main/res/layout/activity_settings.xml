@@ -71,6 +71,26 @@
 
         </LinearLayout>
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="16dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Theme" />
+
+            <Button
+                android:id="@+id/settings_theme_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="System" />
+
+        </LinearLayout>
+
         <Button
             android:id="@+id/settings_disconnect_button"
             android:layout_width="match_parent"

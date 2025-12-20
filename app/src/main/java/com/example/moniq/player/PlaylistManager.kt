@@ -102,6 +102,30 @@ class PlaylistManager(private val ctx: Context) {
         if (changed) prefs.edit().putString(key, arr.toString()).apply()
     }
 
+    fun replaceTrack(playlistId: String, oldTrackId: String, newTrack: Track) {
+        val arr = JSONArray(prefs.getString(key, "[]"))
+        var changed = false
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            if (o.optString("id") == playlistId) {
+                val tracks = o.optJSONArray("tracks") ?: JSONArray()
+                val newTracks = JSONArray()
+                for (j in 0 until tracks.length()) {
+                    val t = tracks.optJSONObject(j) ?: continue
+                    if (t.optString("id") == oldTrackId) {
+                        newTracks.put(trackToJson(newTrack))
+                        changed = true
+                    } else {
+                        newTracks.put(t)
+                    }
+                }
+                o.put("tracks", newTracks)
+                break
+            }
+        }
+        if (changed) prefs.edit().putString(key, arr.toString()).apply()
+    }
+
     private fun playlistToJson(p: Playlist): JSONObject {
         val o = JSONObject()
         o.put("id", p.id)

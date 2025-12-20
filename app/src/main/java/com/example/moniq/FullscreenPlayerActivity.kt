@@ -42,6 +42,8 @@ class FullscreenPlayerActivity : ComponentActivity() {
             if (lines.isNotEmpty()) {
                 lyricsView?.visibility = View.VISIBLE
                 lyricsSetLines(lyricsView, lines)
+                // ensure view refreshes so lines become visible in cases where the view was measured before content
+                lyricsView?.post { try { lyricsView.visibility = View.VISIBLE } catch (_: Exception) {} }
             } else {
                 lyricsView?.visibility = View.GONE
             }
@@ -55,6 +57,67 @@ class FullscreenPlayerActivity : ComponentActivity() {
         val titleView = findViewById<TextView>(R.id.full_title)
         val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar)
         toolbar?.setNavigationOnClickListener { finish() }
+        // add artist and album quick actions to the toolbar
+        try {
+            val artistItem = toolbar.menu.add("Artist")
+            artistItem.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+            artistItem.setIcon(android.R.drawable.ic_menu_myplaces)
+            artistItem.setOnMenuItemClickListener {
+                val name = AudioPlayer.currentArtist.value ?: ""
+                if (name.isBlank()) {
+                    Toast.makeText(this, "No artist available", Toast.LENGTH_SHORT).show()
+                } else {
+                    // try to resolve artist id by searching
+                    lifecycleScope.launch {
+                        try {
+                            val repo = com.example.moniq.search.SearchRepository()
+                            val res = try { repo.search(name) } catch (e: Exception) { null }
+                            val artistId = res?.artists?.firstOrNull()?.id
+                            if (!artistId.isNullOrBlank()) {
+                                val intent = android.content.Intent(this@FullscreenPlayerActivity, ArtistActivity::class.java)
+                                intent.putExtra("artistId", artistId)
+                                intent.putExtra("artistName", name)
+                                startActivity(intent)
+                            } else {
+                                Toast.makeText(this@FullscreenPlayerActivity, "Artist not found", Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (e: Exception) { Toast.makeText(this@FullscreenPlayerActivity, "Artist lookup failed", Toast.LENGTH_SHORT).show() }
+                    }
+                }
+                true
+            }
+
+            val albumItem = toolbar.menu.add("Album")
+            albumItem.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+            albumItem.setIcon(android.R.drawable.ic_menu_gallery)
+            albumItem.setOnMenuItemClickListener {
+                val albumName = AudioPlayer.currentAlbumName.value ?: ""
+                val artistName = AudioPlayer.currentArtist.value ?: ""
+                if (albumName.isBlank()) {
+                    Toast.makeText(this, "No album available", Toast.LENGTH_SHORT).show()
+                } else {
+                    lifecycleScope.launch {
+                        try {
+                            val q = if (artistName.isBlank()) albumName else "$albumName $artistName"
+                            val repo = com.example.moniq.search.SearchRepository()
+                            val res = try { repo.search(q) } catch (e: Exception) { null }
+                            val albumId = res?.albums?.firstOrNull()?.id
+                            val alb = res?.albums?.firstOrNull()
+                            if (!albumId.isNullOrBlank() && alb != null) {
+                                val intent = android.content.Intent(this@FullscreenPlayerActivity, AlbumActivity::class.java)
+                                intent.putExtra("albumId", albumId)
+                                intent.putExtra("albumTitle", alb.name)
+                                intent.putExtra("albumArtist", alb.artist)
+                                startActivity(intent)
+                            } else {
+                                Toast.makeText(this@FullscreenPlayerActivity, "Album not found", Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (e: Exception) { Toast.makeText(this@FullscreenPlayerActivity, "Album lookup failed", Toast.LENGTH_SHORT).show() }
+                    }
+                }
+                true
+            }
+        } catch (_: Exception) {}
         val artistView = findViewById<TextView>(R.id.full_artist)
         val artView = findViewById<ImageView>(R.id.full_art)
         val prevBtn = findViewById<ImageButton>(R.id.full_prev)
@@ -321,6 +384,26 @@ class FullscreenPlayerActivity : ComponentActivity() {
             slider?.trackActiveTintList = ColorStateList.valueOf(color)
             slider?.trackInactiveTintList = ColorStateList.valueOf(adjustAlpha(color, 0.28f))
             slider?.thumbTintList = ColorStateList.valueOf(color)
+            // tint material buttons text and icon to the dominant color
+            downloadBtn?.setTextColor(color)
+            queueBtn?.setTextColor(color)
+            stopBtn?.setTextColor(color)
+            try { downloadBtn?.iconTint = ColorStateList.valueOf(color) } catch (_: Exception) {}
+            try { queueBtn?.iconTint = ColorStateList.valueOf(color) } catch (_: Exception) {}
+            try { stopBtn?.iconTint = ColorStateList.valueOf(color) } catch (_: Exception) {}
+            // also set toolbar menu icons and lyrics accent via reflection
+            try {
+                val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar)
+                toolbar?.overflowIcon?.setTint(color)
+            } catch (_: Exception) {}
+            try { // set lyrics accent color if LyricsView present
+                val lv = findViewById<View>(R.id.full_lyrics_view)
+                val cls = Class.forName("com.example.moniq.views.LyricsView")
+                if (lv != null && cls.isInstance(lv)) {
+                    val m = cls.getMethod("setAccentColor", Integer::class.javaPrimitiveType)
+                    m.invoke(lv, color)
+                }
+            } catch (_: Exception) {}
         } catch (_: Exception) {}
     }
 

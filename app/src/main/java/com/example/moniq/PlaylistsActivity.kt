@@ -175,6 +175,87 @@ class PlaylistsActivity : ComponentActivity() {
         load(adapter)
     }
 
+    private fun showImportResultsDialog(results: List<com.example.moniq.player.PlaylistImporter.ImportResult>, playlistId: String, adapter: PlaylistAdapter, manager: PlaylistManager) {
+        val ctx = this
+        val view = layoutInflater.inflate(android.R.layout.simple_list_item_1, null)
+        val rv = androidx.recyclerview.widget.RecyclerView(this)
+        rv.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
+        val listAdapter = object: androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder>() {
+            var items = results
+            override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): androidx.recyclerview.widget.RecyclerView.ViewHolder {
+                val v = layoutInflater.inflate(R.layout.item_import_result, parent, false)
+                return object: androidx.recyclerview.widget.RecyclerView.ViewHolder(v){}
+            }
+            override fun onBindViewHolder(holder: androidx.recyclerview.widget.RecyclerView.ViewHolder, position: Int) {
+                val entry = items[position]
+                val v = holder.itemView
+                val titleView = v.findViewById<android.widget.TextView>(R.id.importOriginal)
+                val statusView = v.findViewById<android.widget.TextView>(R.id.importStatus)
+                val removeBtn = v.findViewById<android.widget.Button>(R.id.importRemove)
+                val replaceBtn = v.findViewById<android.widget.Button>(R.id.importReplace)
+                titleView.text = entry.originalQuery
+                if (entry.matched != null) {
+                    statusView.text = "Matched: ${entry.matched.title} — ${entry.matched.artist}"
+                    removeBtn.isEnabled = true
+                    replaceBtn.isEnabled = true
+                } else {
+                    statusView.text = "Not found"
+                    removeBtn.isEnabled = false
+                    replaceBtn.isEnabled = true
+                }
+                removeBtn.setOnClickListener {
+                    try {
+                        entry.matched?.let { m -> manager.removeTrack(playlistId, m.id); adapter.update(manager.list()) }
+                    } catch (_: Exception) {}
+                }
+                replaceBtn.setOnClickListener {
+                    // search for replacement
+                    lifecycleScope.launch {
+                        try {
+                            val repo = com.example.moniq.search.SearchRepository()
+                            val res = withContext(Dispatchers.IO) { repo.search(entry.originalQuery) }
+                            val songs = res.songs
+                            if (songs.isEmpty()) {
+                                runOnUiThread { android.widget.Toast.makeText(ctx, "No replacements found", android.widget.Toast.LENGTH_SHORT).show() }
+                                return@launch
+                            }
+                            val labels = songs.map { s -> if (!s.artist.isNullOrBlank()) "${s.title} — ${s.artist}" else s.title }.toTypedArray()
+                            val choice = kotlinx.coroutines.suspendCancellableCoroutine<Int?> { cont ->
+                                val dlg = MaterialAlertDialogBuilder(ctx)
+                                    .setTitle("Choose replacement for:\n${entry.originalQuery}")
+                                dlg.setItems(labels) { _, which -> cont.resume(which) {} }
+                                val d = dlg.show()
+                                cont.invokeOnCancellation { try { d.dismiss() } catch (_: Exception) {} }
+                            }
+                            if (choice == null) return@launch
+                            val sel = songs[choice]
+                            // perform replace: if matched existed, replace matched.id else just add new track
+                            withContext(Dispatchers.Main) {
+                                try {
+                                    if (entry.matched != null) manager.replaceTrack(playlistId, entry.matched.id, com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.durationSec, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
+                                    else manager.addTrack(playlistId, com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.durationSec, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
+                                    adapter.update(manager.list())
+                                } catch (_: Exception) {}
+                            }
+                        } catch (e: Exception) { runOnUiThread { android.widget.Toast.makeText(ctx, "Replacement failed", android.widget.Toast.LENGTH_SHORT).show() } }
+                    }
+                }
+            }
+            override fun getItemCount(): Int = items.size
+        }
+        rv.adapter = listAdapter
+
+        // Ensure item layout exists; create minimal layout if missing
+        try {
+            val dlg = MaterialAlertDialogBuilder(this)
+                .setTitle("Import results")
+                .setView(rv)
+                .setPositiveButton("Close", null)
+                .create()
+            dlg.show()
+        } catch (_: Exception) {}
+    }
+
     private fun load(adapter: PlaylistAdapter) {
         adapter.update(manager.list())
     }
@@ -217,9 +298,11 @@ class PlaylistsActivity : ComponentActivity() {
                     progressBar.progress = p
                     tv.text = "Importing... $p%"
                 }
-                importer.importInto(playlistId, uri) { imported ->
+                importer.importInto(playlistId, uri) { imported, details ->
                     runOnUiThread {
                         android.widget.Toast.makeText(this, "Imported $imported tracks", android.widget.Toast.LENGTH_LONG).show()
+                        // Show results review dialog with ability to remove/replace
+                        showImportResultsDialog(details, playlistId, adapter, manager)
                     }
                 }
             }

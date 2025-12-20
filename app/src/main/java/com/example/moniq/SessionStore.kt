@@ -19,6 +19,7 @@ object SessionStore {
     private const val KEY_LAST_TRACK_ART = "last_track_art"
     private const val KEY_LAST_IS_PLAYING = "last_is_playing"
     private const val KEY_DOWNLOAD_DIR = "download_dir"
+    private const val KEY_THEME_MODE = "theme_mode"
 
     private fun prefs(context: Context): SharedPreferences {
         return try {
@@ -105,6 +106,15 @@ object SessionStore {
 
     fun loadDownloadDirectory(context: Context): String? {
         return prefs(context).getString(KEY_DOWNLOAD_DIR, null)
+    }
+
+    // Theme mode: 0 = follow system, 1 = light, 2 = dark
+    fun saveThemeMode(context: Context, mode: Int) {
+        prefs(context).edit().putInt(KEY_THEME_MODE, mode).apply()
+    }
+
+    fun loadThemeMode(context: Context, default: Int = 0): Int {
+        return prefs(context).getInt(KEY_THEME_MODE, default)
     }
 
     data class LastTrack(val id: String, val posMs: Long, val title: String?, val artist: String?, val artUrl: String?, val wasPlaying: Boolean)

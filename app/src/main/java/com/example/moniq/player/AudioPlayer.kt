@@ -40,6 +40,7 @@ object AudioPlayer {
     val isPlaying = MutableLiveData(false)
     val playbackSpeed = MutableLiveData<Float>(1.0f)
     private var lastNotifiedArtSrc: String? = null
+    private var lastNotifiedBitmap: android.graphics.Bitmap? = null
 
     fun initialize(context: Context) {
         if (player != null) return
@@ -178,6 +179,8 @@ object AudioPlayer {
                             .setSmallIconResourceId(R.mipmap.ic_launcher)
                             .setMediaDescriptionAdapter(adapter)
             playerNotificationManager = builder.build()
+            // Attach the ExoPlayer so PlayerNotificationManager can manage media notification artwork
+            try { playerNotificationManager?.setPlayer(player) } catch (_: Exception) {}
             // Post our custom notification immediately
             try {
                 postCustomNotification()
@@ -317,40 +320,29 @@ object AudioPlayer {
                                         if (!tr.artist.isNullOrEmpty()) setArtist(tr.artist)
                                         val coverId = tr.coverArtId ?: tr.albumId ?: tr.id
                                         if (!coverId.isNullOrEmpty()) {
-                                            // If coverId looks like an absolute URL, use it
-                                            // directly; otherwise build host-based cover URL
                                             if (coverId.startsWith("http")) {
-                                                try {
-                                                    setArtworkUri(android.net.Uri.parse(coverId))
-                                                } catch (_: Exception) {}
+                                                try { setArtworkUri(android.net.Uri.parse(coverId)) } catch (_: Exception) {}
                                             } else if (SessionManager.host != null) {
                                                 try {
-                                                    val art =
-                                                            android.net.Uri.parse(
-                                                                            SessionManager.host
-                                                                    )
-                                                                    .buildUpon()
-                                                                    .appendPath("rest")
-                                                                    .appendPath("getCoverArt.view")
-                                                                    .appendQueryParameter(
-                                                                            "id",
-                                                                            coverId
-                                                                    )
-                                                                    .appendQueryParameter(
-                                                                            "u",
-                                                                            SessionManager.username
-                                                                                    ?: ""
-                                                                    )
-                                                                    .appendQueryParameter(
-                                                                            "p",
-                                                                            SessionManager.password
-                                                                                    ?: ""
-                                                                    )
-                                                                    .build()
+                                                    val art = android.net.Uri.parse(SessionManager.host)
+                                                            .buildUpon()
+                                                            .appendPath("rest").appendPath("getCoverArt.view")
+                                                            .appendQueryParameter("id", coverId)
+                                                            .appendQueryParameter("u", SessionManager.username ?: "")
+                                                            .appendQueryParameter("p", SessionManager.password ?: "")
+                                                            .build()
                                                     setArtworkUri(art)
                                                 } catch (_: Exception) {}
                                             }
                                         }
+                                        // attach extras so UI can navigate to album/artist if needed
+                                        try {
+                                            val extras = android.os.Bundle()
+                                            tr.albumId?.let { extras.putString("albumId", it) }
+                                            tr.albumName?.let { extras.putString("albumName", it) }
+                                            extras.putString("trackArtist", tr.artist)
+                                            setExtras(extras)
+                                        } catch (_: Exception) {}
                                     }
                                     .build()
                     MediaItem.Builder().setUri(url).setMediaMetadata(meta).setTag(tr.id).build()
@@ -884,6 +876,11 @@ object AudioPlayer {
                 } catch (_: Exception) {}
                 builder.setCustomContentView(rv)
 
+            // If we have a cached bitmap from a previous fetch, reuse it to avoid flicker
+            if (lastNotifiedBitmap != null) {
+                try { builder.setLargeIcon(lastNotifiedBitmap) } catch (_: Exception) {}
+                try { rv.setImageViewBitmap(R.id.notif_cover, lastNotifiedBitmap) } catch (_: Exception) {}
+            }
             val notif = builder.build()
             nm.notify(1, notif)
 
@@ -924,13 +921,9 @@ object AudioPlayer {
                                     val stream = conn.getInputStream()
                                     val bytes = stream.readBytes()
                                     stream.close()
-                                    val bmp =
-                                            android.graphics.BitmapFactory.decodeByteArray(
-                                                    bytes,
-                                                    0,
-                                                    bytes.size
-                                            )
+                                    val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                                     if (bmp != null) {
+                                        lastNotifiedBitmap = bmp
                                         try {
                                             builder.setLargeIcon(bmp)
                                             try {
