@@ -99,7 +99,7 @@ class SearchActivity : ComponentActivity() {
             if (currentSearchSongs.isNotEmpty()) {
                 AudioPlayer.setQueue(currentSearchSongs, pos)
             } else {
-                AudioPlayer.playTrack(this, t.id, t.title, t.artist, albumArtUrl)
+                AudioPlayer.playTrack(this, t.id, t.title, t.artist, albumArtUrl, t.albumId, t.albumName)
             }
         }, onDownload = { t ->
                 val filterGroup = findViewById<ChipGroup?>(resources.getIdentifier("searchFilterGroup", "id", packageName))

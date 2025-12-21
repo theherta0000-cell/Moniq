@@ -48,7 +48,6 @@ class ArtistActivity : ComponentActivity() {
         }, compact = true)
         albumsRecycler?.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this, androidx.recyclerview.widget.LinearLayoutManager.HORIZONTAL, false)
         albumsRecycler?.adapter = albumAdapter
-        albumsRecycler?.setHasFixedSize(true)
 
         // Popular songs (randomized list)
         val popularSongsRecycler = findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.popularSongsRecycler)
@@ -181,12 +180,20 @@ class ArtistActivity : ComponentActivity() {
                 // Pick random albums and fetch tracks from them to show as "Popular songs"
                 try {
                     val musicRepo = com.example.moniq.music.MusicRepository()
-                    val candidates = albums.shuffled().take(6)
+                    val candidates = albums.shuffled().take(8)
                     val allTracks = mutableListOf<com.example.moniq.model.Track>()
                     for (alb in candidates) {
                         try {
                             val t = musicRepo.getAlbumTracks(alb.id)
-                            allTracks.addAll(t)
+                            // prefer tracks whose artist matches this artist name
+                            val byArtist = t.filter { tr ->
+                                try {
+                                    val an = artistName.lowercase().trim()
+                                    val ta = (tr.artist ?: "").lowercase().trim()
+                                    ta.contains(an) || an.contains(ta)
+                                } catch (_: Exception) { false }
+                            }
+                            if (byArtist.isNotEmpty()) allTracks.addAll(byArtist) else allTracks.addAll(t)
                         } catch (_: Throwable) {}
                     }
                     val unique = allTracks.distinctBy { it.id }

@@ -116,6 +116,8 @@ class RecentlyPlayedManager(private val ctx: Context) {
         o.put("title", t.title)
         o.put("artist", t.artist)
         o.put("albumId", t.albumId)
+        // ADD ALBUM NAME
+        o.put("albumName", t.albumName)
         // Normalize coverArtId to an absolute URL when possible so recent items always show covers
         val cover = when {
             t.coverArtId.isNullOrBlank() -> null
@@ -133,13 +135,23 @@ class RecentlyPlayedManager(private val ctx: Context) {
     }
 
     private fun jsonToTrack(o: JSONObject): Track? {
-        val id = o.optString("id", null) ?: return null
-        val title = o.optString("title", "")
-        val artist = o.optString("artist", "")
-        val albumId = o.optString("albumId", null)
-        val coverArt = o.optString("coverArtId", null)
-        return Track(id, title, artist, 0, albumId = albumId, coverArtId = coverArt)
-    }
+    val id = o.optString("id", null) ?: return null
+    val title = o.optString("title", "")
+    val artist = o.optString("artist", "")
+    val albumId = o.optString("albumId", null)
+    // READ ALBUM NAME
+    val albumName = o.optString("albumName", null)
+    val coverArt = o.optString("coverArtId", null)
+    return Track(
+        id = id,
+        title = title,
+        artist = artist,
+        durationSec = 0,  // Changed from "duration" to "durationSec"
+        albumId = albumId,
+        albumName = albumName,
+        coverArtId = coverArt
+    )
+}
 
     /**
      * Update the stored coverArtId for an existing recent entry by track id.

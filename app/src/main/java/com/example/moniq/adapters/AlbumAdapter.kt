@@ -38,7 +38,7 @@ class AlbumAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val alb = items[position]
         Log.d("AlbumAdapter", "onBind album id=${alb.id} name='${alb.name}' artist='${alb.artist}'")
-        holder.name.text = alb.name
+        holder.name.text = if (alb.name.isNullOrBlank()) "(untitled album)" else alb.name
         Log.d("AlbumAdapter", "binding album: id=${alb.id}, name='${alb.name}', artist='${alb.artist}'")
         holder.artist.text = alb.artist ?: ""
         val host = com.example.moniq.SessionManager.host

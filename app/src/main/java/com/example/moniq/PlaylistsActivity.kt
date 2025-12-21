@@ -177,9 +177,19 @@ class PlaylistsActivity : ComponentActivity() {
 
     private fun showImportResultsDialog(results: List<com.example.moniq.player.PlaylistImporter.ImportResult>, playlistId: String, adapter: PlaylistAdapter, manager: PlaylistManager) {
         val ctx = this
-        val view = layoutInflater.inflate(android.R.layout.simple_list_item_1, null)
-        val rv = androidx.recyclerview.widget.RecyclerView(this)
-        rv.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            val pad = (16 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        val rv = androidx.recyclerview.widget.RecyclerView(this).apply {
+            layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this@PlaylistsActivity)
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                (320 * resources.displayMetrics.density).toInt()
+            )
+        }
+        container.addView(rv)
         val listAdapter = object: androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder>() {
             var items = results.toMutableList()
             override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): androidx.recyclerview.widget.RecyclerView.ViewHolder {
@@ -293,14 +303,82 @@ class PlaylistsActivity : ComponentActivity() {
         }
         rv.adapter = listAdapter
 
-        // Ensure item layout exists; create minimal layout if missing
+        // Show results inside a sized container so RecyclerView is visible in the dialog
         try {
             val dlg = MaterialAlertDialogBuilder(this)
                 .setTitle("Import results")
-                .setView(rv)
+                .setView(container)
                 .setPositiveButton("Close", null)
                 .create()
             dlg.show()
+        } catch (e: Exception) {
+            // If showing dialog fails (window token etc), persist as fallback and notify
+            try {
+                val fname = "import_results_${System.currentTimeMillis()}.txt"
+                val f = java.io.File(filesDir, fname)
+                val sb = StringBuilder()
+                for (r in results) {
+                    val m = r.matched
+                    val line = listOf(r.originalQuery.replace('\t',' '), m?.id ?: "", m?.title ?: "", m?.artist ?: "").joinToString("\t")
+                    sb.append(line).append("\n")
+                }
+                f.writeText(sb.toString())
+                android.widget.Toast.makeText(this, "Saved import results to ${f.name}", android.widget.Toast.LENGTH_LONG).show()
+            } catch (_: Exception) {
+                try { android.widget.Toast.makeText(this, "Failed to show import results: ${e.message}", android.widget.Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Check for any persisted import result files and show them
+        try {
+            val files = filesDir.listFiles() ?: return
+                        for (f in files) {
+                if (f.name.startsWith("import_results_") && f.name.endsWith(".txt")) {
+    // Extract playlist ID from filename: import_results_{playlistId}_{timestamp}.txt
+    val parts = f.name.removePrefix("import_results_").removeSuffix(".txt").split("_")
+    val extractedPlaylistId = if (parts.size >= 2) parts[0] else null
+                    try {
+                        val lines = f.readText().split('\n').map { it.trim() }.filter { it.isNotEmpty() }
+                        val results = mutableListOf<com.example.moniq.player.PlaylistImporter.ImportResult>()
+                        for (ln in lines) {
+                            val parts = ln.split('\t')
+                            val orig = parts.getOrNull(0) ?: ""
+                            val mid = parts.getOrNull(1) ?: ""
+                            val mtitle = parts.getOrNull(2) ?: ""
+                            val martist = parts.getOrNull(3) ?: ""
+                            val matched = if (mid.isNotBlank()) com.example.moniq.model.Track(mid, mtitle, martist, 0) else null
+                            results.add(com.example.moniq.player.PlaylistImporter.ImportResult(orig, matched))
+                        }
+                        // find the existing playlist adapter from the recycler view if available
+                        val rvView = try { findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.playlistRecycler) } catch (_: Exception) { null }
+                        // Ask user which playlist these results are for
+val playlists = manager.list()
+if (playlists.isEmpty()) {
+    android.widget.Toast.makeText(this, "No playlists found - cannot load import results", android.widget.Toast.LENGTH_SHORT).show()
+    try { f.delete() } catch (_: Exception) {}
+    continue
+}
+val names = playlists.map { it.name }.toTypedArray()
+android.app.AlertDialog.Builder(this)
+    .setTitle("Import results found - select playlist")
+    .setItems(names) { _, idx ->
+        val selectedId = playlists[idx].id
+        val pa = (rvView?.adapter as? com.example.moniq.adapters.PlaylistAdapter) ?: com.example.moniq.adapters.PlaylistAdapter(manager.list(), onOpen = { p -> val intent = android.content.Intent(this, PlaylistDetailActivity::class.java); intent.putExtra("playlistId", p.id); startActivity(intent)}, onDelete = { p -> manager.delete(p.id); rvView?.adapter?.let { (it as? com.example.moniq.adapters.PlaylistAdapter)?.update(manager.list()) } }, onDownload = {})
+        showImportResultsDialog(results, selectedId, pa, manager)
+        try { f.delete() } catch (_: Exception) {}
+    }
+    .setNegativeButton("Discard") { _, _ ->
+        try { f.delete() } catch (_: Exception) {}
+    }
+    .show()
+continue
+                    } catch (_: Exception) {}
+                    try { f.delete() } catch (_: Exception) {}
+                }
+            }
         } catch (_: Exception) {}
     }
 
@@ -347,10 +425,31 @@ class PlaylistsActivity : ComponentActivity() {
                     tv.text = "Importing... $p%"
                 }
                 importer.importInto(playlistId, uri) { imported, details ->
+                    try { android.util.Log.i("PlaylistsActivity", "import complete: imported=$imported details=${details.size}") } catch (_: Exception) {}
                     runOnUiThread {
-                        android.widget.Toast.makeText(this, "Imported $imported tracks", android.widget.Toast.LENGTH_LONG).show()
-                        // Show results review dialog with ability to remove/replace
-                        showImportResultsDialog(details, playlistId, adapter, manager)
+                        try { android.widget.Toast.makeText(this, "Imported $imported tracks", android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
+                        // If activity is finishing/destroyed, persist results to file and notify user instead of showing dialog
+                        try {
+                            if (isFinishing || isDestroyed) {
+                                try {
+                                    val fname = "import_results_${playlistId}_${System.currentTimeMillis()}.txt"
+                                    val f = java.io.File(filesDir, fname)
+                                    val sb = StringBuilder()
+                                    for (r in details) {
+                                        val m = r.matched
+                                        val line = listOf(r.originalQuery.replace('\t',' '), m?.id ?: "", m?.title ?: "", m?.artist ?: "").joinToString("\t")
+                                        sb.append(line).append("\n")
+                                    }
+                                    f.writeText(sb.toString())
+                                    android.widget.Toast.makeText(this, "Import finished; results saved", android.widget.Toast.LENGTH_LONG).show()
+                                } catch (e: Exception) { try { android.widget.Toast.makeText(this, "Import finished but failed to persist results: ${e.message}", android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {} }
+                            } else {
+                                showImportResultsDialog(details, playlistId, adapter, manager)
+                            }
+                        } catch (e: Exception) {
+                            try { android.widget.Toast.makeText(this, "Import finished but failed to show results: ${e.message}", android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
+                            android.util.Log.w("PlaylistsActivity", "showImportResultsDialog failed", e)
+                        }
                     }
                 }
             }

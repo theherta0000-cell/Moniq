@@ -23,16 +23,15 @@ object SessionStore {
 
     private fun prefs(context: Context): SharedPreferences {
         return try {
-            val masterKey = MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
+            val masterKey =
+                    MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
 
             EncryptedSharedPreferences.create(
-                context,
-                PREFS_NAME,
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                    context,
+                    PREFS_NAME,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (t: Throwable) {
             // If encrypted prefs cannot be created on this device or API level,
@@ -44,11 +43,11 @@ object SessionStore {
     fun save(context: Context, host: String, user: String, pass: String, legacy: Boolean) {
         val p = prefs(context)
         p.edit()
-            .putString(KEY_HOST, host)
-            .putString(KEY_USER, user)
-            .putString(KEY_PASS, pass)
-            .putBoolean(KEY_LEGACY, legacy)
-            .apply()
+                .putString(KEY_HOST, host)
+                .putString(KEY_USER, user)
+                .putString(KEY_PASS, pass)
+                .putBoolean(KEY_LEGACY, legacy)
+                .apply()
     }
 
     fun load(context: Context): Boolean {
@@ -78,15 +77,24 @@ object SessionStore {
         return prefs(context).getFloat(KEY_PLAYBACK_SPEED, default)
     }
 
-    fun saveLastTrack(context: Context, trackId: String?, posMs: Long, title: String?, artist: String?, artUrl: String?, isPlaying: Boolean) {
-        prefs(context).edit()
-            .putString(KEY_LAST_TRACK_ID, trackId)
-            .putLong(KEY_LAST_TRACK_POS, posMs)
-            .putString(KEY_LAST_TRACK_TITLE, title)
-            .putString(KEY_LAST_TRACK_ARTIST, artist)
-            .putString(KEY_LAST_TRACK_ART, artUrl)
-            .putBoolean(KEY_LAST_IS_PLAYING, isPlaying)
-            .apply()
+    fun saveLastTrack(
+            context: Context,
+            trackId: String?,
+            posMs: Long,
+            title: String?,
+            artist: String?,
+            artUrl: String?,
+            isPlaying: Boolean
+    ) {
+        prefs(context)
+                .edit()
+                .putString(KEY_LAST_TRACK_ID, trackId)
+                .putLong(KEY_LAST_TRACK_POS, posMs)
+                .putString(KEY_LAST_TRACK_TITLE, title)
+                .putString(KEY_LAST_TRACK_ARTIST, artist)
+                .putString(KEY_LAST_TRACK_ART, artUrl)
+                .putBoolean(KEY_LAST_IS_PLAYING, isPlaying)
+                .apply()
     }
 
     fun loadLastTrack(context: Context): LastTrack? {
@@ -117,5 +125,34 @@ object SessionStore {
         return prefs(context).getInt(KEY_THEME_MODE, default)
     }
 
-    data class LastTrack(val id: String, val posMs: Long, val title: String?, val artist: String?, val artUrl: String?, val wasPlaying: Boolean)
+    data class LastTrack(
+            val id: String,
+            val posMs: Long,
+            val title: String?,
+            val artist: String?,
+            val artUrl: String?,
+            val wasPlaying: Boolean
+    )
+
+    // Add these methods to your existing SessionStore object/class
+
+    fun saveShowRomanization(context: Context, show: Boolean) {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("show_romanization", show).apply()
+    }
+
+    fun loadShowRomanization(context: Context, default: Boolean = true): Boolean {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        return prefs.getBoolean("show_romanization", default)
+    }
+
+    fun saveShowTranslation(context: Context, show: Boolean) {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("show_translation", show).apply()
+    }
+
+    fun loadShowTranslation(context: Context, default: Boolean = true): Boolean {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        return prefs.getBoolean("show_translation", default)
+    }
 }

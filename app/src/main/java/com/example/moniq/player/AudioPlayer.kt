@@ -36,6 +36,7 @@ object AudioPlayer {
     val currentArtist = MutableLiveData<String?>(null)
     val currentAlbumArt = MutableLiveData<String?>(null)
     val currentAlbumName = MutableLiveData<String?>(null)
+    val currentAlbumId = MutableLiveData<String?>(null)
     val currentDominantColor = MutableLiveData<Int?>(null)
     val isPlaying = MutableLiveData(false)
     val playbackSpeed = MutableLiveData<Float>(1.0f)
@@ -179,39 +180,27 @@ object AudioPlayer {
                             .setSmallIconResourceId(R.mipmap.ic_launcher)
                             .setMediaDescriptionAdapter(adapter)
             playerNotificationManager = builder.build()
-            // NOTE: we intentionally DO NOT attach the ExoPlayer to PlayerNotificationManager here
-            // to avoid PlayerNotificationManager posting its own notification which conflicted
-            // with our custom notification and caused the brief/vanishing notification bug.
-            // We keep the manager instance for potential future use but do not call setPlayer().
-            try { /* Intentionally not attaching playerNotificationManager to player */ } catch (_: Exception) {}
-            // Post our custom notification immediately
-            try {
-                postCustomNotification()
-            } catch (_: Exception) {}
-            // Start a lightweight updater to refresh notification display (keeps time text
-            // up-to-date)
-            try {
-                val h = android.os.Handler(android.os.Looper.getMainLooper())
-                val updater =
-                        object : Runnable {
-                            override fun run() {
-                                try {
-                                    // also update our custom notification view
-                                    try {
-                                        postCustomNotification()
-                                    } catch (_: Exception) {}
-                                } catch (_: Exception) {}
-                                h.postDelayed(this, 1000)
-                            }
-                        }
-                h.postDelayed(updater, 1000)
-            } catch (_: Exception) {}
+            // Attach the ExoPlayer so PlayerNotificationManager manages the media notification
+            try { playerNotificationManager?.setPlayer(player) } catch (_: Exception) {}
         } catch (_: Exception) {}
 
         player?.addListener(
                 object : Player.Listener {
                     override fun onIsPlayingChanged(isPlayingNow: Boolean) {
                         isPlaying.postValue(isPlayingNow)
+                        try {
+                            val ctx = appContext
+                            if (ctx != null) {
+                                val svc = android.content.Intent(ctx, PlaybackService::class.java)
+                                if (isPlayingNow) {
+                                    try {
+                                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) ctx.startForegroundService(svc) else ctx.startService(svc)
+                                    } catch (_: Exception) { try { ctx.startService(svc) } catch (_: Exception) {} }
+                                } else {
+                                    try { ctx.stopService(svc) } catch (_: Exception) {}
+                                }
+                            }
+                        } catch (_: Exception) {}
                         try {
                             val ctx = appContext
                             if (ctx != null) {
@@ -225,7 +214,10 @@ object AudioPlayer {
                             currentTitle.postValue(meta?.title?.toString())
                             currentArtist.postValue(meta?.artist?.toString())
                             currentAlbumArt.postValue(meta?.artworkUri?.toString())
-                            currentAlbumName.postValue(meta?.albumTitle?.toString())
+                            // prefer explicit albumTitle, fallback to extras if present
+                            val albumTitle = meta?.albumTitle?.toString()?.takeIf { it.isNotBlank() }
+                                ?: mediaItem?.mediaMetadata?.extras?.getString("albumName")
+                            currentAlbumName.postValue(albumTitle)
                             // compute dominant color asynchronously when artwork changes
                             try {
                                 val art = meta?.artworkUri?.toString()
@@ -263,6 +255,11 @@ object AudioPlayer {
                             // try to read track id from tag if present
                             try {
                                 currentTrackId = mediaItem?.localConfiguration?.tag as? String
+                            } catch (_: Exception) {}
+                            try {
+                                val extras = mediaItem?.mediaMetadata?.extras
+                                val aid = extras?.getString("albumId")
+                                if (!aid.isNullOrBlank()) currentAlbumId.postValue(aid) else currentAlbumId.postValue(null)
                             } catch (_: Exception) {}
                             try {
                                 val ctx = appContext
@@ -388,14 +385,16 @@ object AudioPlayer {
         try {
             val trId = queue.getOrNull(startIndex)?.localConfiguration?.tag as? String
             if (!trId.isNullOrEmpty() && appContext != null) {
-                // store a minimal Track entry for recently played
+                // store a minimal Track entry for recently played with album info
+                val extras = firstMeta?.extras
                 val tmp =
                         com.example.moniq.model.Track(
                                 trId,
                                 firstMeta?.title?.toString() ?: "",
                                 firstMeta?.artist?.toString() ?: "",
                                 0,
-                                albumId = null,
+                                albumId = extras?.getString("albumId"),
+                                albumName = extras?.getString("albumName"),
                                 coverArtId = firstMeta?.artworkUri?.toString()
                         )
                 RecentlyPlayedManager(appContext!!).add(tmp)
@@ -591,32 +590,39 @@ object AudioPlayer {
         val qId = URLEncoder.encode(tr.id, "UTF-8")
         val url = "${base}rest/stream.view?u=$qU&p=$qP&id=$qId&v=1.16.1&c=Moniq"
         val meta =
-                MediaMetadata.Builder()
-                        .apply {
-                            if (!tr.title.isNullOrEmpty()) setTitle(tr.title)
-                            if (!tr.artist.isNullOrEmpty()) setArtist(tr.artist)
-                            if (!tr.albumName.isNullOrBlank()) setAlbumTitle(tr.albumName)
-                            val coverId = tr.coverArtId ?: tr.albumId ?: tr.id
-                            if (!coverId.isNullOrEmpty() && SessionManager.host != null) {
-                                val art =
-                                        android.net.Uri.parse(SessionManager.host)
-                                                .buildUpon()
-                                                .appendPath("rest")
-                                                .appendPath("getCoverArt.view")
-                                                .appendQueryParameter("id", coverId)
-                                                .appendQueryParameter(
-                                                        "u",
-                                                        SessionManager.username ?: ""
-                                                )
-                                                .appendQueryParameter(
-                                                        "p",
-                                                        SessionManager.password ?: ""
-                                                )
-                                                .build()
-                                setArtworkUri(art)
-                            }
-                        }
-                        .build()
+            MediaMetadata.Builder()
+                .apply {
+                    if (!tr.title.isNullOrEmpty()) setTitle(tr.title)
+                    if (!tr.artist.isNullOrEmpty()) setArtist(tr.artist)
+                    if (!tr.albumName.isNullOrBlank()) setAlbumTitle(tr.albumName)
+                    val coverId = tr.coverArtId ?: tr.albumId ?: tr.id
+                    if (!coverId.isNullOrEmpty() && SessionManager.host != null) {
+                    val art =
+                        android.net.Uri.parse(SessionManager.host)
+                            .buildUpon()
+                            .appendPath("rest")
+                            .appendPath("getCoverArt.view")
+                            .appendQueryParameter("id", coverId)
+                            .appendQueryParameter(
+                                "u",
+                                SessionManager.username ?: ""
+                            )
+                            .appendQueryParameter(
+                                "p",
+                                SessionManager.password ?: ""
+                            )
+                            .build()
+                    setArtworkUri(art)
+                    }
+                    try {
+                    val extras = android.os.Bundle()
+                    tr.albumId?.let { extras.putString("albumId", it) }
+                    tr.albumName?.let { extras.putString("albumName", it) }
+                    extras.putString("trackArtist", tr.artist)
+                    setExtras(extras)
+                    } catch (_: Exception) {}
+                }
+                .build()
         return MediaItem.Builder().setUri(url).setMediaMetadata(meta).setTag(tr.id).build()
     }
 
@@ -664,12 +670,14 @@ object AudioPlayer {
         } catch (_: Exception) {}
     }
 
-    fun playTrack(
+   fun playTrack(
             context: Context,
             trackId: String,
             title: String? = null,
             artist: String? = null,
-            albumArt: String? = null
+            albumArt: String? = null,
+            albumId: String? = null,
+            albumName: String? = null
     ) {
         currentTrackId = trackId
         // Play a single track by creating a one-item queue so next/prev work properly
@@ -679,7 +687,8 @@ object AudioPlayer {
                         title ?: "",
                         artist ?: "",
                         0,
-                        albumId = null,
+                        albumId = albumId,
+                        albumName = albumName,
                         coverArtId = albumArt
                 )
         setQueue(listOf(temp), 0)
@@ -691,10 +700,12 @@ object AudioPlayer {
             trackId: String,
             title: String? = null,
             artist: String? = null,
-            albumArt: String? = null
+            albumArt: String? = null,
+            albumId: String? = null,
+            albumName: String? = null
     ) {
         val ctx = appContext ?: return
-        playTrack(ctx, trackId, title, artist, albumArt)
+        playTrack(ctx, trackId, title, artist, albumArt, albumId, albumName)
     }
 
     fun playStream(

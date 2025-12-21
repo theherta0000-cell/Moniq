@@ -2,7 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     package="com.example.moniq">
+    
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- ADD THESE TWO PERMISSIONS -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    
     <application
         android:allowBackup="true"
         android:name=".MoniqApp"
@@ -13,6 +18,12 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Moniq">
+        
+        <!-- UPDATE THIS SERVICE DECLARATION -->
+        <service 
+            android:name="com.example.moniq.player.PlaybackService" 
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
         
         <!-- LoginActivity is now the launcher (first screen) -->
         <activity
@@ -58,13 +69,12 @@
             android:exported="false"
             android:label="Player"
             android:theme="@style/Theme.Moniq" />
-            <activity android:name=".SettingsActivity" />
+        <activity android:name=".SettingsActivity" />
         <activity android:name=".QueueActivity" />
         <activity android:name=".PlaylistsActivity" android:exported="false" android:label="Playlists" android:theme="@style/Theme.Moniq" />
         <activity android:name=".PlaylistDetailActivity" android:exported="false" android:label="Playlist" android:theme="@style/Theme.Moniq" />
         <activity android:name=".NotificationSeekActivity" android:exported="false" android:label="Seek" android:theme="@style/Theme.MaterialComponents.DayNight.Dialog.Alert" />
         <activity android:name=".RecentlyListActivity" android:exported="false" android:label="Recently Listened" android:theme="@style/Theme.Moniq" />
         <receiver android:name=".player.NotificationActionReceiver" android:exported="false" />
-
-</application>
+    </application>
 </manifest>

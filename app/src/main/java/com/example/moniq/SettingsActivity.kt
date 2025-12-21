@@ -55,6 +55,22 @@ class SettingsActivity : ComponentActivity() {
             com.example.moniq.SessionStore.savePlaybackSpeed(this, speed)
         }
 
+        // Lyrics display settings
+        val romanizationSwitch = findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.settings_show_romanization_switch)
+        val translationSwitch = findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.settings_show_translation_switch)
+        
+        // Load saved preferences
+        romanizationSwitch.isChecked = com.example.moniq.SessionStore.loadShowRomanization(this, true)
+        translationSwitch.isChecked = com.example.moniq.SessionStore.loadShowTranslation(this, true)
+        
+        romanizationSwitch.setOnCheckedChangeListener { _, isChecked ->
+            com.example.moniq.SessionStore.saveShowRomanization(this, isChecked)
+        }
+        
+        translationSwitch.setOnCheckedChangeListener { _, isChecked ->
+            com.example.moniq.SessionStore.saveShowTranslation(this, isChecked)
+        }
+
         // Disconnect button: clear stored credentials and return to login
         val disconnect = findViewById<android.widget.Button>(R.id.settings_disconnect_button)
         disconnect.setOnClickListener {

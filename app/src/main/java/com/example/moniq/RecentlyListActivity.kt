@@ -23,18 +23,18 @@ class RecentlyListActivity : ComponentActivity() {
 
         // Simple adapters
         val trackAdapter = com.example.moniq.adapters.TrackAdapter(emptyList(), { t, pos ->
-            val coverId = t.coverArtId ?: t.albumId ?: t.id
-            val albumArtUrl = if (SessionManager.host != null) {
-                if (coverId.startsWith("http")) coverId
-                else android.net.Uri.parse(SessionManager.host).buildUpon()
-                    .appendPath("rest").appendPath("getCoverArt.view")
-                    .appendQueryParameter("id", coverId)
-                    .appendQueryParameter("u", SessionManager.username ?: "")
-                    .appendQueryParameter("p", SessionManager.password ?: "")
-                    .build().toString()
-            } else null
-            AudioPlayer.playTrack(this, t.id, t.title, t.artist, albumArtUrl)
-        }, onDownload = { t ->
+    val coverId = t.coverArtId ?: t.albumId ?: t.id
+    val albumArtUrl = if (SessionManager.host != null) {
+        if (coverId.startsWith("http")) coverId
+        else android.net.Uri.parse(SessionManager.host).buildUpon()
+            .appendPath("rest").appendPath("getCoverArt.view")
+            .appendQueryParameter("id", coverId)
+            .appendQueryParameter("u", SessionManager.username ?: "")
+            .appendQueryParameter("p", SessionManager.password ?: "")
+            .build().toString()
+    } else null
+    AudioPlayer.playTrack(this, t.id, t.title, t.artist, albumArtUrl, t.albumId, t.albumName)
+}, onDownload = { t ->
             // try to download track (best-effort)
             lifecycleScope.launch {
                 val coverId = t.coverArtId ?: t.albumId ?: t.id
@@ -91,10 +91,13 @@ class RecentlyListActivity : ComponentActivity() {
         artistsRecycler?.layoutManager = LinearLayoutManager(this)
         artistsRecycler?.adapter = artistAdapter
 
-        val albumAdapter = SimpleTextCountAdapter { albumId ->
-            // try to open AlbumActivity if id looks like an id, otherwise open search
+       // Store mapping of albumId -> albumName for display
+        val albumIdToName = mutableMapOf<String, String>()
+        
+        val albumAdapter = AlbumIdAdapter { albumId, albumName ->
             val i = Intent(this, AlbumActivity::class.java)
             i.putExtra("albumId", albumId)
+            i.putExtra("albumTitle", albumName)
             startActivity(i)
         }
         albumsRecycler?.layoutManager = LinearLayoutManager(this)
@@ -110,8 +113,18 @@ class RecentlyListActivity : ComponentActivity() {
                 val artistCounts = rpm.getArtistPlayCounts().toList().sortedByDescending { it.second }
                 artistAdapter.update(artistCounts.map { Pair(it.first, it.second) })
 
+                // Build mapping of albumId -> albumName from recent tracks
+                recent.forEach { track ->
+                    if (!track.albumId.isNullOrBlank() && !track.albumName.isNullOrBlank()) {
+                        albumIdToName[track.albumId] = track.albumName
+                    }
+                }
+
                 val albumCounts = rpm.getAlbumPlayCounts().toList().sortedByDescending { it.second }
-                albumAdapter.update(albumCounts.map { Pair(it.first, it.second) })
+                // Create triples with albumId, albumName, and count
+                albumAdapter.update(albumCounts.map { (albumId, count) -> 
+                    Triple(albumId, albumIdToName[albumId] ?: albumId, count) 
+                })
             } catch (_: Exception) {}
         }
     }
@@ -129,6 +142,23 @@ class RecentlyListActivity : ComponentActivity() {
             holder.title.text = text
             holder.subtitle.text = "Plays: $count"
             holder.itemView.setOnClickListener { onClick(text) }
+        }
+        override fun getItemCount(): Int = items.size
+    }
+
+    // Adapter for albums that stores both ID and name
+    class AlbumIdAdapter(val onClick: (String, String) -> Unit) : RecyclerView.Adapter<SimpleTextCountViewHolder>() {
+        private var items: List<Triple<String, String, Int>> = emptyList() // (albumId, albumName, count)
+        fun update(list: List<Triple<String, String, Int>>) { items = list; notifyDataSetChanged() }
+        override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): SimpleTextCountViewHolder {
+            val v = android.view.LayoutInflater.from(parent.context).inflate(android.R.layout.simple_list_item_2, parent, false)
+            return SimpleTextCountViewHolder(v)
+        }
+        override fun onBindViewHolder(holder: SimpleTextCountViewHolder, position: Int) {
+            val (albumId, albumName, count) = items[position]
+            holder.title.text = albumName
+            holder.subtitle.text = "Plays: $count"
+            holder.itemView.setOnClickListener { onClick(albumId, albumName) }
         }
         override fun getItemCount(): Int = items.size
     }
