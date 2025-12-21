@@ -100,10 +100,8 @@ class ArtistActivity : ComponentActivity() {
             }
         }
 
-        val fetchRow = findViewById<LinearLayout?>(R.id.artistFetchRow)
-        val fetchLinkView = findViewById<TextView?>(R.id.artistFetchLink)
-        val viewRespBtn = findViewById<Button?>(R.id.artistViewResponse)
-        var latestResponse: String? = null
+       // Removed debug fetch info UI references
+var latestResponse: String? = null
 
         lifecycleScope.launch {
             try {
@@ -159,18 +157,7 @@ class ArtistActivity : ComponentActivity() {
                         val pwParam = if (SessionManager.legacy) SessionManager.password ?: "" else com.example.moniq.util.Crypto.md5(SessionManager.password ?: "")
                         val resp = api.getArtistInfo(SessionManager.username ?: "", pwParam, artistId)
                         latestResponse = resp.body() ?: ""
-                        // build visible link used
-                        val link = android.net.Uri.parse(base).buildUpon()
-                            .appendPath("rest").appendPath("getArtistInfo.view")
-                            .appendQueryParameter("u", SessionManager.username ?: "")
-                            .appendQueryParameter("p", pwParam)
-                            .appendQueryParameter("id", artistId)
-                            .appendQueryParameter("v", "1.16.1")
-                            .appendQueryParameter("c", "Moniq")
-                            .build().toString()
-                        fetchRow?.visibility = android.view.View.VISIBLE
-                        fetchLinkView?.text = "fetched using: $link"
-                        viewRespBtn?.visibility = android.view.View.VISIBLE
+// Debug fetch info UI removed
                     }
                 } catch (_: Throwable) {}
 
@@ -207,22 +194,7 @@ class ArtistActivity : ComponentActivity() {
                 bioView.text = "Failed to load biography"
                 albumAdapter.update(emptyList())
             }
-            // wire response button after network attempt
-            viewRespBtn?.setOnClickListener {
-                val resp = latestResponse ?: "(no response captured)"
-                val tv = TextView(this@ArtistActivity)
-                tv.text = resp
-                tv.setPadding(16)
-                tv.isVerticalScrollBarEnabled = true
-                val container = android.widget.ScrollView(this@ArtistActivity)
-                container.addView(tv, android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
-                val dlg = androidx.appcompat.app.AlertDialog.Builder(this@ArtistActivity)
-                    .setTitle("Artist API Response")
-                    .setView(container)
-                    .setPositiveButton("Close", null)
-                    .create()
-                dlg.show()
-            }
+           // View response button removed
         }
 
         // Miniplayer wiring

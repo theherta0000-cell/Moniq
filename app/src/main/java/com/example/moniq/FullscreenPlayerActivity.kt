@@ -51,7 +51,7 @@ class FullscreenPlayerActivity : ComponentActivity() {
     // Check if we have cached lyrics
     val cachedLyrics = lyricsCache[cacheKey]
     if (cachedLyrics != null) {
-        lyricsLoadedFor = cacheKey  // IMPORTANT: Update this!
+        lyricsLoadedFor = cacheKey
         lyricsView?.visibility = View.VISIBLE
         lyricsSetLines(lyricsView, cachedLyrics)
         // Apply display settings when loading from cache
@@ -59,9 +59,11 @@ class FullscreenPlayerActivity : ComponentActivity() {
         val showTranslation = com.example.moniq.SessionStore.loadShowTranslation(this, true)
         lyricsSetShowTransliteration(lyricsView, showRomanization)
         lyricsSetShowTranslation(lyricsView, showTranslation)
+        // Update position immediately so previous lyrics are colored
+        lyricsUpdatePosition(lyricsView, AudioPlayer.currentPosition())
         lyricsView?.post { try { lyricsView.visibility = View.VISIBLE } catch (_: Exception) {} }
         Toast.makeText(this, "Loaded from cache", Toast.LENGTH_SHORT).show()
-        return  // IMPORTANT: Return here!
+        return
     }
     
     // If not in cache, proceed to fetch
@@ -87,37 +89,38 @@ class FullscreenPlayerActivity : ComponentActivity() {
 
     lyricsFetchJob = lifecycleScope.launch {
         try {
-            val url = com.example.moniq.network.LyricsFetcher.buildUrl(title, artist, album, durSec)
-            val lines = withContext(Dispatchers.IO) { com.example.moniq.network.LyricsFetcher.fetchLyrics(title, artist, album, durSec) }
-            if (lines.isNotEmpty()) {
-                // Store in cache
-                lyricsCache[cacheKey] = lines
-                
-                lyricsView?.visibility = View.VISIBLE
-                lyricsSetLines(lyricsView, lines)
+           val result = withContext(Dispatchers.IO) { com.example.moniq.network.LyricsFetcher.fetchLyrics(title, artist, album, durSec) }
+if (result.lines.isNotEmpty()) {
+    // Store in cache
+    lyricsCache[cacheKey] = result.lines
+    
+    lyricsView?.visibility = View.VISIBLE
+    lyricsSetLines(lyricsView, result.lines)
                 // Apply display settings
                 val showRomanization = com.example.moniq.SessionStore.loadShowRomanization(this@FullscreenPlayerActivity, true)
                 val showTranslation = com.example.moniq.SessionStore.loadShowTranslation(this@FullscreenPlayerActivity, true)
                 lyricsSetShowTransliteration(lyricsView, showRomanization)
                 lyricsSetShowTranslation(lyricsView, showTranslation)
+                // Update position immediately so previous lyrics are colored
+                lyricsUpdatePosition(lyricsView, AudioPlayer.currentPosition())
                 // ensure view refreshes so lines become visible in cases where the view was measured before content
                 lyricsView?.post { try { lyricsView.visibility = View.VISIBLE } catch (_: Exception) {} }
                 
                 // Show success message with URL for a few seconds
                 runOnUiThread {
-                    Toast.makeText(
-                        this@FullscreenPlayerActivity, 
-                        "Fetched successfully from: $url", 
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
+    Toast.makeText(
+        this@FullscreenPlayerActivity, 
+        "Fetched successfully from: ${result.successfulUrl ?: "unknown"}", 
+        Toast.LENGTH_LONG
+    ).show()
+}
             } else {
                 lyricsView?.visibility = View.GONE
                 runOnUiThread { android.widget.Toast.makeText(this@FullscreenPlayerActivity, "No lyrics found", android.widget.Toast.LENGTH_SHORT).show() }
                 runOnUiThread {
                     try {
                         val info = android.widget.TextView(this@FullscreenPlayerActivity)
-                        info.text = "Tried: $url"
+                        info.text = "Tried all backends"
                         info.setPadding(24,24,24,24)
                         com.google.android.material.dialog.MaterialAlertDialogBuilder(this@FullscreenPlayerActivity)
                             .setTitle("Lyrics not found")
@@ -134,11 +137,10 @@ class FullscreenPlayerActivity : ComponentActivity() {
             if (e is kotlinx.coroutines.CancellationException) {
                 // user cancelled
             } else {
-                val url = try { com.example.moniq.network.LyricsFetcher.buildUrl(title, artist, album, durSec) } catch (_: Exception) { "(unknown)" }
                 runOnUiThread {
-                    try {
-                        val tv = android.widget.TextView(this@FullscreenPlayerActivity)
-                        tv.text = "Attempted: $url\n\nError: ${e.message}"
+    try {
+        val tv = android.widget.TextView(this@FullscreenPlayerActivity)
+        tv.text = "Attempted all backends\n\nError: ${e.message}"
                         tv.setPadding(24,24,24,24)
                         com.google.android.material.dialog.MaterialAlertDialogBuilder(this@FullscreenPlayerActivity)
                             .setTitle("Lyrics fetch failed")
@@ -160,16 +162,16 @@ class FullscreenPlayerActivity : ComponentActivity() {
 }
 
     private suspend fun loadLyricsRetry(nTitle: String?, nArtist: String?, nAlbum: String?, lyricsView: View?, durSec: Int) {
-        try {
-            val lines = withContext(Dispatchers.IO) { com.example.moniq.network.LyricsFetcher.fetchLyrics(nTitle, nArtist, nAlbum, durSec) }
-        if (lines.isNotEmpty()) {
+    try {
+        val result = withContext(Dispatchers.IO) { com.example.moniq.network.LyricsFetcher.fetchLyrics(nTitle, nArtist, nAlbum, durSec) }
+        if (result.lines.isNotEmpty()) {
             // Store in cache
             val cacheKey = "$nTitle|$nArtist|$nAlbum"
-            lyricsCache[cacheKey] = lines
+            lyricsCache[cacheKey] = result.lines
             
             runOnUiThread {
                 lyricsView?.visibility = View.VISIBLE
-                lyricsSetLines(lyricsView, lines)
+                lyricsSetLines(lyricsView, result.lines)
                 // Apply lyrics display settings
                 val showRomanization = com.example.moniq.SessionStore.loadShowRomanization(this@FullscreenPlayerActivity, true)
                 val showTranslation = com.example.moniq.SessionStore.loadShowTranslation(this@FullscreenPlayerActivity, true)
@@ -177,8 +179,8 @@ class FullscreenPlayerActivity : ComponentActivity() {
                 lyricsSetShowTranslation(lyricsView, showTranslation)
                 lyricsView?.post { try { lyricsView.visibility = View.VISIBLE } catch (_: Exception) {} }
                 // Show success message
-                Toast.makeText(this@FullscreenPlayerActivity, "Fetched successfully!", Toast.LENGTH_SHORT).show()
-            }   
+                Toast.makeText(this@FullscreenPlayerActivity, "Fetched from: ${result.successfulUrl ?: "unknown"}", Toast.LENGTH_LONG).show()
+            }
         } else {
             // No lyrics found - show edit dialog again
             runOnUiThread {
@@ -188,10 +190,10 @@ class FullscreenPlayerActivity : ComponentActivity() {
         }
     } catch (e: Exception) {
         // Error occurred - show edit dialog again
-            runOnUiThread {
-                Toast.makeText(this@FullscreenPlayerActivity, "Retry failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                showEditSearchDialog(nTitle, nArtist, nAlbum, lyricsView, durSec)
-            }
+        runOnUiThread {
+            Toast.makeText(this@FullscreenPlayerActivity, "Retry failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            showEditSearchDialog(nTitle, nArtist, nAlbum, lyricsView, durSec)
+        }
     }
 }
 
@@ -397,6 +399,22 @@ private fun showEditSearchDialog(title: String?, artist: String?, album: String?
         val toggleLyrics = findViewById<MaterialButton>(R.id.full_toggle_lyrics)
         val lyricsOverlay = findViewById<View>(R.id.full_lyrics_overlay)
         val lyricsView = findViewById<View>(R.id.full_lyrics_view)
+
+       // Set up seek listener for lyrics
+try {
+    val cls = Class.forName("com.example.moniq.views.LyricsView")
+    if (lyricsView != null && cls.isInstance(lyricsView)) {
+        val listener = object : kotlin.jvm.functions.Function1<Long, Unit> {
+            override fun invoke(posMs: Long) {
+                AudioPlayer.seekTo(posMs)
+            }
+        }
+        val m = cls.getMethod("setOnSeekListener", kotlin.jvm.functions.Function1::class.java)
+        m.invoke(lyricsView, listener)
+    }
+} catch (_: Exception) {}
+
+
         // Prepare views for fade animations
         val playControls = findViewById<LinearLayout>(R.id.playControls)
         val btmActions = findViewById<LinearLayout>(R.id.btmActions)
@@ -487,16 +505,25 @@ private fun showEditSearchDialog(title: String?, artist: String?, album: String?
         }
     }
 
-    override fun onResume() {
+   override fun onResume() {
         super.onResume()
         
-        // Apply lyrics display preferences
+        // Apply lyrics display preferences - force refresh
         val lyricsView = findViewById<View>(R.id.full_lyrics_view)
         val showRomanization = com.example.moniq.SessionStore.loadShowRomanization(this, true)
         val showTranslation = com.example.moniq.SessionStore.loadShowTranslation(this, true)
         
+        // Apply settings and force view to refresh
         lyricsSetShowTransliteration(lyricsView, showRomanization)
         lyricsSetShowTranslation(lyricsView, showTranslation)
+        
+        // Force view to invalidate and redraw
+        lyricsView?.post { 
+            try {
+                lyricsSetShowTransliteration(lyricsView, showRomanization)
+                lyricsSetShowTranslation(lyricsView, showTranslation)
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onDestroy() {

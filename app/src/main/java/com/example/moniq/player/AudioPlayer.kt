@@ -204,7 +204,7 @@ object AudioPlayer {
                         try {
                             val ctx = appContext
                             if (ctx != null) {
-                                com.example.moniq.SessionStore.saveLastTrack(ctx, currentTrackId, player?.currentPosition ?: 0L, currentTitle.value, currentArtist.value, currentAlbumArt.value, isPlayingNow)
+                               com.example.moniq.SessionStore.saveLastTrack(ctx, currentTrackId, player?.currentPosition ?: 0L, currentTitle.value, currentArtist.value, currentAlbumArt.value, isPlayingNow, currentAlbumId.value, currentAlbumName.value)
                             }
                         } catch (_: Exception) {}
                     }
@@ -264,11 +264,38 @@ object AudioPlayer {
                             try {
                                 val ctx = appContext
                                 if (ctx != null) {
-                                    com.example.moniq.SessionStore.saveLastTrack(ctx, currentTrackId, 0L, currentTitle.value, currentArtist.value, currentAlbumArt.value, player?.isPlaying == true)
+                                    com.example.moniq.SessionStore.saveLastTrack(ctx, currentTrackId, 0L, currentTitle.value, currentArtist.value, currentAlbumArt.value, player?.isPlaying == true, currentAlbumId.value, currentAlbumName.value)
                                 }
                             } catch (_: Exception) {}
                         } catch (_: Exception) {}
                     }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+    when (playbackState) {
+        Player.STATE_ENDED -> {
+            // Queue has finished - do nothing, just stay idle
+            // Player will show last track's metadata
+            isPlaying.postValue(false)
+            try {
+                val ctx = appContext
+                if (ctx != null) {
+                    // Stop the foreground service since we're done
+                    val svc = android.content.Intent(ctx, PlaybackService::class.java)
+                    ctx.stopService(svc)
+                }
+            } catch (_: Exception) {}
+        }
+        Player.STATE_READY -> {
+            // Ready to play
+        }
+        Player.STATE_BUFFERING -> {
+            // Buffering
+        }
+        Player.STATE_IDLE -> {
+            // Idle
+        }
+    }
+}
                 }
         )
         // apply persisted playback speed
@@ -399,7 +426,8 @@ object AudioPlayer {
                         )
                 RecentlyPlayedManager(appContext!!).add(tmp)
                     try {
-                        com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.title?.toString(), firstMeta?.artist?.toString(), firstMeta?.artworkUri?.toString(), true)
+                       val extras = firstMeta?.extras
+com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.title?.toString(), firstMeta?.artist?.toString(), firstMeta?.artworkUri?.toString(), true, extras?.getString("albumId"), extras?.getString("albumName"))
                     } catch (_: Exception) {}
             }
         } catch (_: Exception) {}
@@ -957,21 +985,23 @@ object AudioPlayer {
     }
 
     fun restoreLast(context: Context) {
-        try {
-            val last = com.example.moniq.SessionStore.loadLastTrack(context) ?: return
-            val tr = com.example.moniq.model.Track(last.id, last.title ?: "", last.artist ?: "", 0, albumId = null, coverArtId = last.artUrl)
-            initialize(context)
-            val item = buildMediaItemForTrack(tr)
-            queue.clear()
-            queue.add(item)
-            player?.setMediaItems(queue, 0, last.posMs)
-            player?.prepare()
-            try { player?.pause() } catch (_: Exception) {}
-            currentTrackId = last.id
-            currentTitle.postValue(last.title)
-            currentArtist.postValue(last.artist)
-            currentAlbumArt.postValue(last.artUrl)
-            isPlaying.postValue(false)
-        } catch (_: Exception) {}
-    }
+    try {
+        val last = com.example.moniq.SessionStore.loadLastTrack(context) ?: return
+        val tr = com.example.moniq.model.Track(last.id, last.title ?: "", last.artist ?: "", 0, albumId = last.albumId, albumName = last.albumName, coverArtId = last.artUrl)
+        initialize(context)
+        val item = buildMediaItemForTrack(tr)
+        queue.clear()
+        queue.add(item)
+        player?.setMediaItems(queue, 0, last.posMs)
+        player?.prepare()
+        try { player?.pause() } catch (_: Exception) {}
+        currentTrackId = last.id
+        currentTitle.postValue(last.title)
+        currentArtist.postValue(last.artist)
+        currentAlbumArt.postValue(last.artUrl)
+        currentAlbumName.postValue(last.albumName)
+        currentAlbumId.postValue(last.albumId)
+        isPlaying.postValue(false)
+    } catch (_: Exception) {}
+}
 }

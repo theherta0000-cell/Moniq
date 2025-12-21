@@ -26,28 +26,33 @@
         }
 
         private data class LineInfo(
-            val startMs: Long, 
-            val endMs: Long, 
-            val text: String, 
-            val syllableOffsets: List<Int>, 
-            val syllables: List<com.example.moniq.lyrics.Syllable>,
-            val transliteration: String?,
-            val translation: String?
-        )
-        
-        private val lines = mutableListOf<LineInfo>()
-        private val textViews = mutableListOf<TextView>()
-        private val transliterationViews = mutableListOf<TextView>()
-        private val translationViews = mutableListOf<TextView>()
-        private var currentIndex = -1
-        private var focusedMode = false
-        private var accentColor: Int = try { context.getColor(com.example.moniq.R.color.purple_700) } catch (_: Exception) { Color.MAGENTA }
-        private var showTransliteration = true
-        private var showTranslation = true
+    val startMs: Long, 
+    val endMs: Long, 
+    val text: String, 
+    val syllableOffsets: List<Int>, 
+    val syllables: List<com.example.moniq.lyrics.Syllable>,
+    val transliteration: String?,
+    val translation: String?
+)
+
+private val lines = mutableListOf<LineInfo>()
+private val textViews = mutableListOf<TextView>()
+private val transliterationViews = mutableListOf<TextView>()
+private val translationViews = mutableListOf<TextView>()
+private var currentIndex = -1
+private var focusedMode = false
+private var accentColor: Int = try { context.getColor(com.example.moniq.R.color.purple_700) } catch (_: Exception) { Color.MAGENTA }
+private var showTransliteration = true
+private var showTranslation = true
+private var onSeekListener: ((Long) -> Unit)? = null
 
         init {
             addView(container)
         }
+
+        fun setOnSeekListener(listener: (Long) -> Unit) {
+    onSeekListener = listener
+}
 
         fun setLines(syllableLines: List<SyllableLine>) {
             container.removeAllViews()
@@ -80,13 +85,25 @@
 
                 // Create a vertical container for this line (original + transliteration + translation)
                 val lineContainer = LinearLayout(context).apply {
-                    orientation = LinearLayout.VERTICAL
-                    gravity = Gravity.CENTER
-                    layoutParams = LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, 
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                    )
-                }
+    orientation = LinearLayout.VERTICAL
+    gravity = Gravity.CENTER
+    layoutParams = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, 
+        ViewGroup.LayoutParams.WRAP_CONTENT
+    )
+    // Make line clickable for seeking
+    isClickable = true
+    isFocusable = true
+    val ripple = android.graphics.drawable.RippleDrawable(
+        android.content.res.ColorStateList.valueOf(accentColor and 0x40FFFFFF),
+        null,
+        null
+    )
+    background = ripple
+    setOnClickListener {
+        onSeekListener?.invoke(start)
+    }
+}
 
                 // Original text view
                 val tv = TextView(context).apply {
@@ -105,39 +122,43 @@
                 lineContainer.addView(tv)
 
                 // Transliteration view (romanization)
-                val translitTv = TextView(context).apply {
-                    layoutParams = LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, 
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                    )
-                    gravity = Gravity.CENTER
-                    setTextColor(Color.GRAY)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                    text = translitText ?: ""
-                    visibility = if ((translitText.isNullOrEmpty() || !showTransliteration)) GONE else VISIBLE
-                    val padding = (2 * resources.displayMetrics.density).toInt()
-                    setPadding(0, padding, 0, padding)
-                    alpha = 0.6f
-                    setTypeface(null, android.graphics.Typeface.ITALIC)
-                }
+val translitTv = TextView(context).apply {
+    layoutParams = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, 
+        ViewGroup.LayoutParams.WRAP_CONTENT
+    )
+    gravity = Gravity.CENTER
+    setTextColor(Color.GRAY)
+    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+    text = translitText ?: ""
+    // Hide if empty, disabled, or identical to main text
+    val isDuplicate = !translitText.isNullOrEmpty() && translitText.trim().equals(lineText.trim(), ignoreCase = true)
+    visibility = if ((translitText.isNullOrEmpty() || !showTransliteration || isDuplicate)) GONE else VISIBLE
+    val padding = (2 * resources.displayMetrics.density).toInt()
+    setPadding(0, padding, 0, padding)
+    alpha = 0.6f
+    setTypeface(null, android.graphics.Typeface.ITALIC)
+}
                 transliterationViews.add(translitTv)
                 lineContainer.addView(translitTv)
 
                 // Translation view
-                val translationTv = TextView(context).apply {
-                    layoutParams = LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, 
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                    )
-                    gravity = Gravity.CENTER
-                    setTextColor(Color.GRAY)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                    text = sl.translation ?: ""
-                    visibility = if ((sl.translation.isNullOrEmpty() || !showTranslation)) GONE else VISIBLE
-                    val padding = (4 * resources.displayMetrics.density).toInt()
-                    setPadding(0, padding, 0, padding)
-                    alpha = 0.7f
-                }
+val translationTv = TextView(context).apply {
+    layoutParams = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, 
+        ViewGroup.LayoutParams.WRAP_CONTENT
+    )
+    gravity = Gravity.CENTER
+    setTextColor(Color.GRAY)
+    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+    text = sl.translation ?: ""
+    // Hide if empty, disabled, or identical to main text
+    val isDuplicate = !sl.translation.isNullOrEmpty() && sl.translation.trim().equals(lineText.trim(), ignoreCase = true)
+    visibility = if ((sl.translation.isNullOrEmpty() || !showTranslation || isDuplicate)) GONE else VISIBLE
+    val padding = (4 * resources.displayMetrics.density).toInt()
+    setPadding(0, padding, 0, padding)
+    alpha = 0.7f
+}
                 translationViews.add(translationTv)
                 lineContainer.addView(translationTv)
 
