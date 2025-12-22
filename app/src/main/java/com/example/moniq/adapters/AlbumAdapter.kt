@@ -115,23 +115,25 @@ class AlbumAdapter(
                         true
                     }
                     "Play next" -> {
-                        try {
-                            if (ctx is androidx.activity.ComponentActivity) {
-                                ctx.lifecycleScope.launch {
-                                    val repo = com.example.moniq.music.MusicRepository()
-                                    val tracks = repo.getAlbumTracks(alb.id)
-                                    com.example.moniq.player.AudioPlayer.initialize(ctx)
-                                    com.example.moniq.player.AudioPlayer.playNext(tracks)
-                                }
-                            } else {
-                                GlobalScope.launch(Dispatchers.IO) {
-                                    try {
-                                        val repo = com.example.moniq.music.MusicRepository()
-                                        val tracks = repo.getAlbumTracks(alb.id)
-                                        withContext(Dispatchers.Main) {
-                                            com.example.moniq.player.AudioPlayer.initialize(ctx)
-                                            com.example.moniq.player.AudioPlayer.playNext(tracks)
-                                        }
+    try {
+        if (ctx is androidx.activity.ComponentActivity) {
+            ctx.lifecycleScope.launch {
+                val repo = com.example.moniq.music.MusicRepository()
+                val tracks = repo.getAlbumTracks(alb.id)
+                val tracksWithAlbum = tracks.map { it.copy(albumId = alb.id, albumName = alb.name) }
+                com.example.moniq.player.AudioPlayer.initialize(ctx)
+                com.example.moniq.player.AudioPlayer.playNext(tracksWithAlbum)
+            }
+                           } else {
+    GlobalScope.launch(Dispatchers.IO) {
+        try {
+            val repo = com.example.moniq.music.MusicRepository()
+            val tracks = repo.getAlbumTracks(alb.id)
+            val tracksWithAlbum = tracks.map { it.copy(albumId = alb.id, albumName = alb.name) }
+            withContext(Dispatchers.Main) {
+                com.example.moniq.player.AudioPlayer.initialize(ctx)
+                com.example.moniq.player.AudioPlayer.playNext(tracksWithAlbum)
+            }
                                     } catch (_: Exception) {}
                                 }
                             }
@@ -140,25 +142,27 @@ class AlbumAdapter(
                     }
                     "Add to queue" -> {
                         try {
-                            if (ctx is androidx.activity.ComponentActivity) {
-                                ctx.lifecycleScope.launch {
-                                    val repo = com.example.moniq.music.MusicRepository()
-                                    val tracks = repo.getAlbumTracks(alb.id)
-                                    com.example.moniq.player.AudioPlayer.initialize(ctx)
-                                    com.example.moniq.player.AudioPlayer.addToQueue(tracks)
-                                }
+        if (ctx is androidx.activity.ComponentActivity) {
+            ctx.lifecycleScope.launch {
+                val repo = com.example.moniq.music.MusicRepository()
+                val tracks = repo.getAlbumTracks(alb.id)
+                val tracksWithAlbum = tracks.map { it.copy(albumId = alb.id, albumName = alb.name) }
+                com.example.moniq.player.AudioPlayer.initialize(ctx)
+                com.example.moniq.player.AudioPlayer.addToQueue(tracksWithAlbum)
+            }
                             } else {
-                                GlobalScope.launch(Dispatchers.IO) {
-                                    try {
-                                        val repo = com.example.moniq.music.MusicRepository()
-                                        val tracks = repo.getAlbumTracks(alb.id)
-                                        withContext(Dispatchers.Main) {
-                                            com.example.moniq.player.AudioPlayer.initialize(ctx)
-                                            com.example.moniq.player.AudioPlayer.addToQueue(tracks)
-                                        }
-                                    } catch (_: Exception) {}
-                                }
-                            }
+            GlobalScope.launch(Dispatchers.IO) {
+                try {
+                    val repo = com.example.moniq.music.MusicRepository()
+                    val tracks = repo.getAlbumTracks(alb.id)
+                    val tracksWithAlbum = tracks.map { it.copy(albumId = alb.id, albumName = alb.name) }
+                    withContext(Dispatchers.Main) {
+                        com.example.moniq.player.AudioPlayer.initialize(ctx)
+                        com.example.moniq.player.AudioPlayer.addToQueue(tracksWithAlbum)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
                         } catch (_: Exception) {}
                         true
                     }

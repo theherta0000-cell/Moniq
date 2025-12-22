@@ -16,10 +16,6 @@ android {
     namespace = "com.example.moniq"
     compileSdk = 36
 
-    lint {
-    checkReleaseBuilds = false
-    abortOnError = false
-}
 
     defaultConfig {
         applicationId = "com.example.moniq"

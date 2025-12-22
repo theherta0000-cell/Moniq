@@ -18,6 +18,8 @@ import com.example.moniq.R
 import com.example.moniq.SessionManager
 import com.example.moniq.util.Crypto
 import java.net.URLEncoder
+import kotlinx.coroutines.*
+import android.util.Log
 
 object AudioPlayer {
     private var player: ExoPlayer? = null
@@ -28,6 +30,8 @@ object AudioPlayer {
     private var queue: MutableList<MediaItem> = mutableListOf()
     val queueTracks = MutableLiveData<List<com.example.moniq.model.Track>>(emptyList())
     val currentQueueIndex = MutableLiveData<Int>(0)
+    private var scrobbleJob: Job? = null
+    private var coroutineScope: CoroutineScope? = null
 
     // notification helpers
     private var notificationManager: NotificationManager? = null
@@ -47,14 +51,24 @@ object AudioPlayer {
         if (player != null) return
         val ctx = context.applicationContext
         appContext = ctx
+
+        // Create a managed coroutine scope
+        if (coroutineScope == null) {
+            coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+        }
         player = ExoPlayer.Builder(ctx).build()
         player?.setAudioAttributes(
-                AudioAttributes.Builder()
-                        .setUsage(C.USAGE_MEDIA)
-                        .setContentType(C.CONTENT_TYPE_MUSIC)
-                        .build(),
-                true
+            AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.CONTENT_TYPE_MUSIC)
+                .build(),
+            true
         )
+
+        // Load Last.fm session
+        try {
+            com.example.moniq.lastfm.LastFmManager.loadSession(ctx)
+        } catch (_: Exception) {}
 
         try {
             mediaSession = MediaSession.Builder(ctx, player!!).build()
@@ -67,172 +81,230 @@ object AudioPlayer {
             notificationManager = nm
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 val ch =
-                        NotificationChannel(
-                                channelId,
-                                ctx.getString(R.string.notification_channel_name),
-                                NotificationManager.IMPORTANCE_LOW
-                        )
+                    NotificationChannel(
+                        channelId,
+                        ctx.getString(R.string.notification_channel_name),
+                        NotificationManager.IMPORTANCE_LOW
+                    )
                 ch.description = ctx.getString(R.string.notification_channel_description)
                 nm.createNotificationChannel(ch)
             }
             val adapter =
-                    object : PlayerNotificationManager.MediaDescriptionAdapter {
-                        override fun getCurrentContentTitle(player: Player): CharSequence {
-                            return currentTitle.value ?: ""
-                        }
+                object : PlayerNotificationManager.MediaDescriptionAdapter {
+                    override fun getCurrentContentTitle(player: Player): CharSequence {
+                        return currentTitle.value ?: ""
+                    }
 
-                        override fun createCurrentContentIntent(
-                                player: Player
-                        ): android.app.PendingIntent? {
-                            return try {
-                                val intent =
-                                        android.content.Intent(
-                                                appContext,
-                                                com.example.moniq.NotificationSeekActivity::class
-                                                        .java
-                                        )
-                                intent.flags =
-                                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                                                android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-                                android.app.PendingIntent.getActivity(
-                                        appContext,
-                                        0,
-                                        intent,
-                                        android.app.PendingIntent.FLAG_IMMUTABLE or
-                                                android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                    override fun createCurrentContentIntent(
+                        player: Player
+                    ): android.app.PendingIntent? {
+                        return try {
+                            val intent =
+                                android.content.Intent(
+                                    appContext,
+                                    com.example.moniq.NotificationSeekActivity::class.java
                                 )
-                            } catch (_: Exception) {
-                                null
-                            }
-                        }
-
-                        override fun getCurrentContentText(player: Player): CharSequence? {
-                            try {
-                                val pos = this@AudioPlayer.player?.currentPosition ?: 0L
-                                val dur = this@AudioPlayer.player?.duration ?: 0L
-                                if (dur > 0L) {
-                                    fun fmt(ms: Long): String {
-                                        val s = (ms / 1000L).toInt()
-                                        val m = s / 60
-                                        val sec = s % 60
-                                        return String.format("%02d:%02d", m, sec)
-                                    }
-                                    return "${fmt(pos)} / ${fmt(dur)}"
-                                }
-                            } catch (_: Exception) {}
-                            return currentArtist.value ?: null
-                        }
-
-                        override fun getCurrentLargeIcon(
-                                player: Player,
-                                callback: PlayerNotificationManager.BitmapCallback
-                        ): android.graphics.Bitmap? {
-                            try {
-                                val artUrl =
-                                        currentAlbumArt.value?.takeIf { it.isNotBlank() }
-                                                ?: run {
-                                                    val id = currentTrackId ?: return null
-                                                    val host = SessionManager.host ?: return null
-                                                    if (id.startsWith("http")) return null
-                                                    android.net.Uri.parse(host)
-                                                            .buildUpon()
-                                                            .appendPath("rest")
-                                                            .appendPath("getCoverArt.view")
-                                                            .appendQueryParameter("id", id)
-                                                            .appendQueryParameter(
-                                                                    "u",
-                                                                    SessionManager.username ?: ""
-                                                            )
-                                                            .appendQueryParameter(
-                                                                    "p",
-                                                                    SessionManager.password ?: ""
-                                                            )
-                                                            .build()
-                                                            .toString()
-                                                }
-
-                                Thread {
-                                            try {
-                                                val stream = java.net.URL(artUrl).openStream()
-                                                val bytes = stream.readBytes()
-                                                val bmp =
-                                                        android.graphics.BitmapFactory
-                                                                .decodeByteArray(
-                                                                        bytes,
-                                                                        0,
-                                                                        bytes.size
-                                                                )
-                                                if (bmp != null) callback.onBitmap(bmp)
-                                            } catch (_: Exception) {}
-                                        }
-                                        .start()
-                            } catch (_: Exception) {}
-                            return null
+                            intent.flags =
+                                android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                            android.app.PendingIntent.getActivity(
+                                appContext,
+                                0,
+                                intent,
+                                android.app.PendingIntent.FLAG_IMMUTABLE or
+                                    android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                            )
+                        } catch (_: Exception) {
+                            null
                         }
                     }
 
+                    override fun getCurrentContentText(player: Player): CharSequence? {
+                        val artist = currentArtist.value ?: ""
+                        val album = currentAlbumName.value ?: ""
+
+                        // Build artist/album text
+                        val metadata =
+                            when {
+                                artist.isNotBlank() && album.isNotBlank() -> "$artist • $album"
+                                artist.isNotBlank() -> artist
+                                album.isNotBlank() -> album
+                                else -> ""
+                            }
+
+                        // Add time if available
+                        try {
+                            val pos = this@AudioPlayer.player?.currentPosition ?: 0L
+                            val dur = this@AudioPlayer.player?.duration ?: 0L
+                            if (dur > 0L) {
+                                fun fmt(ms: Long): String {
+                                    val s = (ms / 1000L).toInt()
+                                    val m = s / 60
+                                    val sec = s % 60
+                                    return String.format("%02d:%02d", m, sec)
+                                }
+                                val timeText = "${fmt(pos)} / ${fmt(dur)}"
+                                return if (metadata.isNotBlank()) "$metadata  •  $timeText"
+                                else timeText
+                            }
+                        } catch (_: Exception) {}
+
+                        return metadata.ifBlank { null }
+                    }
+
+                    override fun getCurrentLargeIcon(
+                        player: Player,
+                        callback: PlayerNotificationManager.BitmapCallback
+                    ): android.graphics.Bitmap? {
+                        try {
+                            val artUrl =
+                                currentAlbumArt.value?.takeIf { it.isNotBlank() }
+                                    ?: run {
+                                        val id = currentTrackId ?: return null
+                                        val host = SessionManager.host ?: return null
+                                        if (id.startsWith("http")) return null
+                                        android.net.Uri.parse(host)
+                                            .buildUpon()
+                                            .appendPath("rest")
+                                            .appendPath("getCoverArt.view")
+                                            .appendQueryParameter("id", id)
+                                            .appendQueryParameter(
+                                                "u",
+                                                SessionManager.username ?: ""
+                                            )
+                                            .appendQueryParameter(
+                                                "p",
+                                                SessionManager.password ?: ""
+                                            )
+                                            .build()
+                                            .toString()
+                                    }
+
+                            Thread {
+                                    try {
+                                        java.net.URL(artUrl).openStream().use { stream ->
+                                            val bytes = stream.readBytes()
+                                            val bmp =
+                                                android.graphics.BitmapFactory.decodeByteArray(
+                                                    bytes,
+                                                    0,
+                                                    bytes.size
+                                                )
+                                            if (bmp != null) callback.onBitmap(bmp)
+                                        }
+                                    } catch (_: Exception) {}
+                                }
+                                .start()
+                        } catch (_: Exception) {}
+                        return null
+                    }
+                }
+
             val builder =
-                    PlayerNotificationManager.Builder(ctx, 1, channelId)
-                            .setChannelNameResourceId(R.string.notification_channel_name)
-                            .setChannelDescriptionResourceId(
-                                    R.string.notification_channel_description
-                            )
-                            .setSmallIconResourceId(R.mipmap.ic_launcher)
-                            .setMediaDescriptionAdapter(adapter)
+                PlayerNotificationManager.Builder(ctx, 1, channelId)
+                    .setChannelNameResourceId(R.string.notification_channel_name)
+                    .setChannelDescriptionResourceId(R.string.notification_channel_description)
+                    .setSmallIconResourceId(R.mipmap.ic_launcher)
+                    .setMediaDescriptionAdapter(adapter)
             playerNotificationManager = builder.build()
-            // Attach the ExoPlayer so PlayerNotificationManager manages the media notification
-            try { playerNotificationManager?.setPlayer(player) } catch (_: Exception) {}
+// Attach the ExoPlayer so PlayerNotificationManager manages the media notification
+try {
+    playerNotificationManager?.setPlayer(player)
+    // Force notification updates during playback for progress/time display
+    playerNotificationManager?.setUseChronometer(true)
+    playerNotificationManager?.setUsePreviousAction(false)
+    playerNotificationManager?.setUseNextAction(false)
+    playerNotificationManager?.setUseStopAction(false)
+} catch (_: Exception) {}
         } catch (_: Exception) {}
 
         player?.addListener(
-                object : Player.Listener {
-                    override fun onIsPlayingChanged(isPlayingNow: Boolean) {
-                        isPlaying.postValue(isPlayingNow)
-                        try {
-                            val ctx = appContext
-                            if (ctx != null) {
-                                val svc = android.content.Intent(ctx, PlaybackService::class.java)
-                                if (isPlayingNow) {
+            object : Player.Listener {
+                override fun onIsPlayingChanged(isPlayingNow: Boolean) {
+                    isPlaying.postValue(isPlayingNow)
+                    try {
+                        val ctx = appContext
+                        if (ctx != null) {
+                            val svc = android.content.Intent(ctx, PlaybackService::class.java)
+                            if (isPlayingNow) {
+                                try {
+                                    if (
+                                        android.os.Build.VERSION.SDK_INT >=
+                                            android.os.Build.VERSION_CODES.O
+                                    )
+                                        ctx.startForegroundService(svc)
+                                    else ctx.startService(svc)
+                                } catch (_: Exception) {
                                     try {
-                                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) ctx.startForegroundService(svc) else ctx.startService(svc)
-                                    } catch (_: Exception) { try { ctx.startService(svc) } catch (_: Exception) {} }
-                                } else {
-                                    try { ctx.stopService(svc) } catch (_: Exception) {}
+                                        ctx.startService(svc)
+                                    } catch (_: Exception) {}
                                 }
+                            } else {
+                                try {
+                                    ctx.stopService(svc)
+                                } catch (_: Exception) {}
                             }
-                        } catch (_: Exception) {}
-                        try {
-                            val ctx = appContext
-                            if (ctx != null) {
-                               com.example.moniq.SessionStore.saveLastTrack(ctx, currentTrackId, player?.currentPosition ?: 0L, currentTitle.value, currentArtist.value, currentAlbumArt.value, isPlayingNow, currentAlbumId.value, currentAlbumName.value)
-                            }
-                        } catch (_: Exception) {}
-                    }
-                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                        try {
-                            val meta = mediaItem?.mediaMetadata
-                            currentTitle.postValue(meta?.title?.toString())
-                            currentArtist.postValue(meta?.artist?.toString())
-                            currentAlbumArt.postValue(meta?.artworkUri?.toString())
-                            // prefer explicit albumTitle, fallback to extras if present
-                            val albumTitle = meta?.albumTitle?.toString()?.takeIf { it.isNotBlank() }
+                        }
+                    } catch (_: Exception) {}
+                    try {
+                        val ctx = appContext
+                        if (ctx != null) {
+                            com.example.moniq.SessionStore.saveLastTrack(
+                                ctx,
+                                currentTrackId,
+                                player?.currentPosition ?: 0L,
+                                currentTitle.value,
+                                currentArtist.value,
+                                currentAlbumArt.value,
+                                isPlayingNow,
+                                currentAlbumId.value,
+                                currentAlbumName.value
+                            )
+                        }
+                    } catch (_: Exception) {}
+                }
+
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    try {
+                        val meta = mediaItem?.mediaMetadata
+                        currentTitle.postValue(meta?.title?.toString())
+                        currentArtist.postValue(meta?.artist?.toString())
+                        currentAlbumArt.postValue(meta?.artworkUri?.toString())
+                        // prefer explicit albumTitle, fallback to extras if present
+                        val albumTitle =
+                            meta?.albumTitle?.toString()?.takeIf { it.isNotBlank() }
                                 ?: mediaItem?.mediaMetadata?.extras?.getString("albumName")
-                            currentAlbumName.postValue(albumTitle)
-                            // compute dominant color asynchronously when artwork changes
-                            try {
-                                val art = meta?.artworkUri?.toString()
-                                if (!art.isNullOrBlank()) {
-                                    Thread {
+                        currentAlbumName.postValue(albumTitle)
+                        // compute dominant color asynchronously when artwork changes
+                        try {
+                            val art = meta?.artworkUri?.toString()
+                            if (!art.isNullOrBlank()) {
+                                Thread {
                                         try {
                                             val conn = java.net.URL(art).openConnection()
                                             conn.connectTimeout = 3000
                                             conn.readTimeout = 3000
                                             val bytes = conn.getInputStream().readBytes()
-                                            val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                            val bmp =
+                                                android.graphics.BitmapFactory.decodeByteArray(
+                                                    bytes,
+                                                    0,
+                                                    bytes.size
+                                                )
                                             if (bmp != null) {
-                                                val small = android.graphics.Bitmap.createScaledBitmap(bmp, 20, 20, true)
-                                                var r = 0L; var g = 0L; var b = 0L; var cnt = 0L
-                                                for (x in 0 until small.width) for (y in 0 until small.height) {
+                                                val small =
+                                                    android.graphics.Bitmap.createScaledBitmap(
+                                                        bmp,
+                                                        20,
+                                                        20,
+                                                        true
+                                                    )
+                                                var r = 0L
+                                                var g = 0L
+                                                var b = 0L
+                                                var cnt = 0L
+                                                for (x in 0 until small.width) for (y in
+                                                    0 until small.height) {
                                                     val c = small.getPixel(x, y)
                                                     r += android.graphics.Color.red(c)
                                                     g += android.graphics.Color.green(c)
@@ -240,67 +312,177 @@ object AudioPlayer {
                                                     cnt++
                                                 }
                                                 if (cnt > 0) {
-                                                    val avg = android.graphics.Color.rgb((r / cnt).toInt(), (g / cnt).toInt(), (b / cnt).toInt())
+                                                    val avg =
+                                                        android.graphics.Color.rgb(
+                                                            (r / cnt).toInt(),
+                                                            (g / cnt).toInt(),
+                                                            (b / cnt).toInt()
+                                                        )
                                                     currentDominantColor.postValue(avg)
                                                 }
                                             }
                                         } catch (_: Exception) {}
-                                    }.start()
-                                } else {
-                                    currentDominantColor.postValue(null)
+                                    }
+                                    .start()
+                            } else {
+                                currentDominantColor.postValue(null)
+                            }
+                        } catch (_: Exception) {}
+                        // ensure observers know which queue index is now active
+                        currentQueueIndex.postValue(player?.currentMediaItemIndex ?: 0)
+                        // try to read track id from tag if present
+                        try {
+                            currentTrackId = mediaItem?.localConfiguration?.tag as? String
+                        } catch (_: Exception) {}
+                        try {
+                            val extras = mediaItem?.mediaMetadata?.extras
+                            val aid = extras?.getString("albumId")
+                            if (!aid.isNullOrBlank()) currentAlbumId.postValue(aid)
+                            else currentAlbumId.postValue(null)
+                        } catch (_: Exception) {}
+                        try {
+                            val ctx = appContext
+                            if (ctx != null) {
+                                com.example.moniq.SessionStore.saveLastTrack(
+                                    ctx,
+                                    currentTrackId,
+                                    0L,
+                                    currentTitle.value,
+                                    currentArtist.value,
+                                    currentAlbumArt.value,
+                                    player?.isPlaying == true,
+                                    currentAlbumId.value,
+                                    currentAlbumName.value
+                                )
+                            }
+                        } catch (_: Exception) {}
+                        // Last.fm: reset scrobble state on track change
+                        try {
+                            com.example.moniq.lastfm.LastFmManager.resetScrobbleState()
+                        } catch (_: Exception) {}
+
+                        // Last.fm: start new track
+                        try {
+                            val title = meta?.title?.toString()
+                            val artist = meta?.artist?.toString()
+                            val album =
+                                meta?.albumTitle?.toString()
+                                    ?: mediaItem?.mediaMetadata?.extras?.getString("albumName")
+                            val trackId =
+                                try {
+                                    mediaItem?.localConfiguration?.tag as? String
+                                } catch (_: Exception) {
+                                    null
                                 }
-                            } catch (_: Exception) {}
-                            // ensure observers know which queue index is now active
-                            currentQueueIndex.postValue(player?.currentMediaItemIndex ?: 0)
-                            // try to read track id from tag if present
-                            try {
-                                currentTrackId = mediaItem?.localConfiguration?.tag as? String
-                            } catch (_: Exception) {}
-                            try {
-                                val extras = mediaItem?.mediaMetadata?.extras
-                                val aid = extras?.getString("albumId")
-                                if (!aid.isNullOrBlank()) currentAlbumId.postValue(aid) else currentAlbumId.postValue(null)
-                            } catch (_: Exception) {}
+
+                            if (
+                                !title.isNullOrBlank() &&
+                                    !artist.isNullOrBlank() &&
+                                    trackId != null
+                            ) {
+                                // Capture duration on main thread before launching coroutine
+val dur = player?.duration ?: 0L
+coroutineScope?.launch(Dispatchers.IO) {
+    com.example.moniq.lastfm.LastFmManager.onTrackStart(
+        trackId,
+        title,
+        artist,
+        album,
+        dur
+    )
+}
+                            }
+                        } catch (_: Exception) {}
+                    } catch (_: Exception) {}
+                }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    when (playbackState) {
+                        Player.STATE_ENDED -> {
+                            // Queue has finished - do nothing, just stay idle
+                            // Player will show last track's metadata
+                            isPlaying.postValue(false)
                             try {
                                 val ctx = appContext
                                 if (ctx != null) {
-                                    com.example.moniq.SessionStore.saveLastTrack(ctx, currentTrackId, 0L, currentTitle.value, currentArtist.value, currentAlbumArt.value, player?.isPlaying == true, currentAlbumId.value, currentAlbumName.value)
+                                    // Stop the foreground service since we're done
+                                    val svc =
+                                        android.content.Intent(ctx, PlaybackService::class.java)
+                                    ctx.stopService(svc)
                                 }
                             } catch (_: Exception) {}
-                        } catch (_: Exception) {}
+                        }
+                        Player.STATE_READY -> {
+                            // Ready to play
+                        }
+                        Player.STATE_BUFFERING -> {
+                            // Buffering
+                        }
+                        Player.STATE_IDLE -> {
+                            // Idle
+                        }
                     }
-
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-    when (playbackState) {
-        Player.STATE_ENDED -> {
-            // Queue has finished - do nothing, just stay idle
-            // Player will show last track's metadata
-            isPlaying.postValue(false)
-            try {
-                val ctx = appContext
-                if (ctx != null) {
-                    // Stop the foreground service since we're done
-                    val svc = android.content.Intent(ctx, PlaybackService::class.java)
-                    ctx.stopService(svc)
                 }
-            } catch (_: Exception) {}
+            }
+        )
+
+        // Start scrobble checker
+scrobbleJob?.cancel()
+scrobbleJob = coroutineScope?.launch(Dispatchers.IO) {
+    while (isActive) {
+        try {
+            val trackId = currentTrackId
+            val title = currentTitle.value
+            val artist = currentArtist.value
+            val album = currentAlbumName.value
+            
+            // Access player on Main thread
+            val (pos, dur) = withContext(Dispatchers.Main) {
+                val position = player?.currentPosition ?: 0L
+                val duration = player?.duration ?: 0L
+                Pair(position, duration)
+            }
+
+            Log.d("LastFm", "DEBUG: ScrobbleJob loop tick. Track ID: $trackId, Title: $title, Artist: $artist, Pos: $pos, Dur: $dur")
+
+            // Check if duration is unset before proceeding
+            if (dur == androidx.media3.common.C.TIME_UNSET) {
+                Log.d("LastFm", "DEBUG: ScrobbleJob - Duration is TIME_UNSET, skipping check for '$title'.")
+                delay(10000)
+                continue // Skip this check cycle if duration is unknown
+            } else {
+                 Log.d("LastFm", "DEBUG: ScrobbleJob - Duration is valid: $dur ms for '$title'.")
+            }
+
+            if (
+                !trackId.isNullOrBlank() &&
+                    !title.isNullOrBlank() &&
+                    !artist.isNullOrBlank() &&
+                    dur > 0 // Dur is now guaranteed not to be TIME_UNSET, check if positive
+            ) {
+                Log.d("LastFm", "DEBUG: ScrobbleJob - All conditions met, calling checkAndScrobble for '$title'.")
+                com.example.moniq.lastfm.LastFmManager.checkAndScrobble(
+                    trackId,
+                    title,
+                    artist,
+                    album,
+                    pos,
+                    dur
+                )
+            } else {
+                 Log.d("LastFm", "DEBUG: ScrobbleJob - Conditions NOT met for '$title'. Details - TrackId ok: ${!trackId.isNullOrBlank()}, Title ok: ${!title.isNullOrBlank()}, Artist ok: ${!artist.isNullOrBlank()}, Dur > 0: ${dur > 0}")
+            }
+        } catch (e: Exception) {
+             Log.e("LastFm", "DEBUG: ScrobbleJob encountered an exception: ", e)
         }
-        Player.STATE_READY -> {
-            // Ready to play
-        }
-        Player.STATE_BUFFERING -> {
-            // Buffering
-        }
-        Player.STATE_IDLE -> {
-            // Idle
-        }
+        delay(10000) // Check every 10 seconds
     }
 }
-                }
-        )
+
         // apply persisted playback speed
         try {
-            val s = com.example.moniq.SessionStore.loadPlaybackSpeed(appContext ?: context, 1.0f)
+            val s =
+                com.example.moniq.SessionStore.loadPlaybackSpeed(appContext ?: context, 1.0f)
             setPlaybackSpeed(s)
             playbackSpeed.postValue(s)
         } catch (_: Exception) {}
@@ -314,7 +496,7 @@ object AudioPlayer {
             p.playbackParameters = params
             playbackSpeed.postValue(speed)
             if (appContext != null)
-                    com.example.moniq.SessionStore.savePlaybackSpeed(appContext!!, speed)
+                com.example.moniq.SessionStore.savePlaybackSpeed(appContext!!, speed)
         } catch (_: Exception) {}
     }
 
@@ -335,46 +517,56 @@ object AudioPlayer {
         }
 
         val items =
-                tracks.map { tr ->
-                    val qU = URLEncoder.encode(username, "UTF-8")
-                    val qP = URLEncoder.encode(pwParam, "UTF-8")
-                    val qId = URLEncoder.encode(tr.id, "UTF-8")
-                    val url = "${base}rest/stream.view?u=$qU&p=$qP&id=$qId&v=1.16.1&c=Moniq"
-                    val meta =
-                            MediaMetadata.Builder()
-                                    .apply {
-                                        if (!tr.title.isNullOrEmpty()) setTitle(tr.title)
-                                        if (!tr.artist.isNullOrEmpty()) setArtist(tr.artist)
-                                        if (!tr.albumName.isNullOrBlank()) setAlbumTitle(tr.albumName)
-                                        val coverId = tr.coverArtId ?: tr.albumId ?: tr.id
-                                        if (!coverId.isNullOrEmpty()) {
-                                            if (coverId.startsWith("http")) {
-                                                try { setArtworkUri(android.net.Uri.parse(coverId)) } catch (_: Exception) {}
-                                            } else if (SessionManager.host != null) {
-                                                try {
-                                                    val art = android.net.Uri.parse(SessionManager.host)
-                                                            .buildUpon()
-                                                            .appendPath("rest").appendPath("getCoverArt.view")
-                                                            .appendQueryParameter("id", coverId)
-                                                            .appendQueryParameter("u", SessionManager.username ?: "")
-                                                            .appendQueryParameter("p", SessionManager.password ?: "")
-                                                            .build()
-                                                    setArtworkUri(art)
-                                                } catch (_: Exception) {}
-                                            }
-                                        }
-                                        // attach extras so UI can navigate to album/artist if needed
-                                        try {
-                                            val extras = android.os.Bundle()
-                                            tr.albumId?.let { extras.putString("albumId", it) }
-                                            tr.albumName?.let { extras.putString("albumName", it) }
-                                            extras.putString("trackArtist", tr.artist)
-                                            setExtras(extras)
-                                        } catch (_: Exception) {}
-                                    }
-                                    .build()
-                    MediaItem.Builder().setUri(url).setMediaMetadata(meta).setTag(tr.id).build()
-                }
+            tracks.map { tr ->
+                val qU = URLEncoder.encode(username, "UTF-8")
+                val qP = URLEncoder.encode(pwParam, "UTF-8")
+                val qId = URLEncoder.encode(tr.id, "UTF-8")
+                val url = "${base}rest/stream.view?u=$qU&p=$qP&id=$qId&v=1.16.1&c=Moniq"
+                val meta =
+                    MediaMetadata.Builder()
+                        .apply {
+                            if (!tr.title.isNullOrEmpty()) setTitle(tr.title)
+                            if (!tr.artist.isNullOrEmpty()) setArtist(tr.artist)
+                            if (!tr.albumName.isNullOrBlank()) setAlbumTitle(tr.albumName)
+                            val coverId = tr.coverArtId ?: tr.albumId ?: tr.id
+                            if (!coverId.isNullOrEmpty()) {
+                                if (coverId.startsWith("http")) {
+                                    try {
+                                        setArtworkUri(android.net.Uri.parse(coverId))
+                                    } catch (_: Exception) {}
+                                } else if (SessionManager.host != null) {
+                                    try {
+                                        val art =
+                                            android.net.Uri.parse(SessionManager.host)
+                                                .buildUpon()
+                                                .appendPath("rest")
+                                                .appendPath("getCoverArt.view")
+                                                .appendQueryParameter("id", coverId)
+                                                .appendQueryParameter(
+                                                    "u",
+                                                    SessionManager.username ?: ""
+                                                )
+                                                .appendQueryParameter(
+                                                    "p",
+                                                    SessionManager.password ?: ""
+                                                )
+                                                .build()
+                                        setArtworkUri(art)
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                            // attach extras so UI can navigate to album/artist if needed
+                            try {
+                                val extras = android.os.Bundle()
+                                tr.albumId?.let { extras.putString("albumId", it) }
+                                tr.albumName?.let { extras.putString("albumName", it) }
+                                extras.putString("trackArtist", tr.artist)
+                                setExtras(extras)
+                            } catch (_: Exception) {}
+                        }
+                        .build()
+                MediaItem.Builder().setUri(url).setMediaMetadata(meta).setTag(tr.id).build()
+            }
         queue.clear()
         queue.addAll(items)
         player?.setMediaItems(queue, startIndex, 0L)
@@ -382,23 +574,23 @@ object AudioPlayer {
         player?.play()
         // update queue live data
         queueTracks.postValue(
-                items.map { mi ->
-                    val meta = mi.mediaMetadata
-                    val id =
-                            try {
-                                mi.localConfiguration?.tag as? String ?: ""
-                            } catch (_: Exception) {
-                                ""
-                            }
-                    com.example.moniq.model.Track(
-                            id,
-                            meta?.title?.toString() ?: "",
-                            meta?.artist?.toString() ?: "",
-                            0,
-                            albumId = null,
-                            coverArtId = meta?.artworkUri?.toString()
-                    )
-                }
+            items.map { mi ->
+                val meta = mi.mediaMetadata
+                val id =
+                    try {
+                        mi.localConfiguration?.tag as? String ?: ""
+                    } catch (_: Exception) {
+                        ""
+                    }
+                com.example.moniq.model.Track(
+                    id,
+                    meta?.title?.toString() ?: "",
+                    meta?.artist?.toString() ?: "",
+                    0,
+                    albumId = null,
+                    coverArtId = meta?.artworkUri?.toString()
+                )
+            }
         )
         currentQueueIndex.postValue(startIndex)
         // update live data
@@ -415,20 +607,30 @@ object AudioPlayer {
                 // store a minimal Track entry for recently played with album info
                 val extras = firstMeta?.extras
                 val tmp =
-                        com.example.moniq.model.Track(
-                                trId,
-                                firstMeta?.title?.toString() ?: "",
-                                firstMeta?.artist?.toString() ?: "",
-                                0,
-                                albumId = extras?.getString("albumId"),
-                                albumName = extras?.getString("albumName"),
-                                coverArtId = firstMeta?.artworkUri?.toString()
-                        )
+                    com.example.moniq.model.Track(
+                        trId,
+                        firstMeta?.title?.toString() ?: "",
+                        firstMeta?.artist?.toString() ?: "",
+                        0,
+                        albumId = extras?.getString("albumId"),
+                        albumName = extras?.getString("albumName"),
+                        coverArtId = firstMeta?.artworkUri?.toString()
+                    )
                 RecentlyPlayedManager(appContext!!).add(tmp)
-                    try {
-                       val extras = firstMeta?.extras
-com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.title?.toString(), firstMeta?.artist?.toString(), firstMeta?.artworkUri?.toString(), true, extras?.getString("albumId"), extras?.getString("albumName"))
-                    } catch (_: Exception) {}
+                try {
+                    val extras = firstMeta?.extras
+                    com.example.moniq.SessionStore.saveLastTrack(
+                        appContext!!,
+                        trId,
+                        0L,
+                        firstMeta?.title?.toString(),
+                        firstMeta?.artist?.toString(),
+                        firstMeta?.artworkUri?.toString(),
+                        true,
+                        extras?.getString("albumId"),
+                        extras?.getString("albumName")
+                    )
+                } catch (_: Exception) {}
             }
         } catch (_: Exception) {}
     }
@@ -454,7 +656,8 @@ com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.
                 player?.prepare()
                 if (wasPlaying) player?.play()
             } else {
-                // For non-current removals, instruct ExoPlayer to remove the item without resetting
+                // For non-current removals, instruct ExoPlayer to remove the item without
+                // resetting
                 // playback
                 queue.removeAt(index)
                 try {
@@ -464,23 +667,23 @@ com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.
                 val newCur = if (index < cur) (cur - 1).coerceAtLeast(0) else cur
                 // update live data without restarting playback
                 queueTracks.postValue(
-                        queue.map { mi ->
-                            val meta = mi.mediaMetadata
-                            val id =
-                                    try {
-                                        mi.localConfiguration?.tag as? String ?: ""
-                                    } catch (_: Exception) {
-                                        ""
-                                    }
-                            com.example.moniq.model.Track(
-                                    id,
-                                    meta?.title?.toString() ?: "",
-                                    meta?.artist?.toString() ?: "",
-                                    0,
-                                    albumId = null,
-                                    coverArtId = meta?.artworkUri?.toString()
-                            )
-                        }
+                    queue.map { mi ->
+                        val meta = mi.mediaMetadata
+                        val id =
+                            try {
+                                mi.localConfiguration?.tag as? String ?: ""
+                            } catch (_: Exception) {
+                                ""
+                            }
+                        com.example.moniq.model.Track(
+                            id,
+                            meta?.title?.toString() ?: "",
+                            meta?.artist?.toString() ?: "",
+                            0,
+                            albumId = null,
+                            coverArtId = meta?.artworkUri?.toString()
+                        )
+                    }
                 )
                 currentQueueIndex.postValue(newCur)
                 return
@@ -502,23 +705,23 @@ com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.
             } catch (_: Exception) {}
             // update live data
             queueTracks.postValue(
-                    queue.map { mi ->
-                        val meta = mi.mediaMetadata
-                        val id =
-                                try {
-                                    mi.localConfiguration?.tag as? String ?: ""
-                                } catch (_: Exception) {
-                                    ""
-                                }
-                        com.example.moniq.model.Track(
-                                id,
-                                meta?.title?.toString() ?: "",
-                                meta?.artist?.toString() ?: "",
-                                0,
-                                albumId = null,
-                                coverArtId = meta?.artworkUri?.toString()
-                        )
-                    }
+                queue.map { mi ->
+                    val meta = mi.mediaMetadata
+                    val id =
+                        try {
+                            mi.localConfiguration?.tag as? String ?: ""
+                        } catch (_: Exception) {
+                            ""
+                        }
+                    com.example.moniq.model.Track(
+                        id,
+                        meta?.title?.toString() ?: "",
+                        meta?.artist?.toString() ?: "",
+                        0,
+                        albumId = null,
+                        coverArtId = meta?.artworkUri?.toString()
+                    )
+                }
             )
         } catch (_: Exception) {}
     }
@@ -537,23 +740,23 @@ com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.
                 player?.prepare()
             } catch (_: Exception) {}
             queueTracks.postValue(
-                    queue.map { mi ->
-                        val meta = mi.mediaMetadata
-                        val id =
-                                try {
-                                    mi.localConfiguration?.tag as? String ?: ""
-                                } catch (_: Exception) {
-                                    ""
-                                }
-                        com.example.moniq.model.Track(
-                                id,
-                                meta?.title?.toString() ?: "",
-                                meta?.artist?.toString() ?: "",
-                                0,
-                                albumId = null,
-                                coverArtId = meta?.artworkUri?.toString()
-                        )
-                    }
+                queue.map { mi ->
+                    val meta = mi.mediaMetadata
+                    val id =
+                        try {
+                            mi.localConfiguration?.tag as? String ?: ""
+                        } catch (_: Exception) {
+                            ""
+                        }
+                    com.example.moniq.model.Track(
+                        id,
+                        meta?.title?.toString() ?: "",
+                        meta?.artist?.toString() ?: "",
+                        0,
+                        albumId = null,
+                        coverArtId = meta?.artworkUri?.toString()
+                    )
+                }
             )
         } catch (_: Exception) {}
     }
@@ -572,7 +775,10 @@ com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.
                 val item = buildMediaItemForTrack(t)
                 queue.add(idx.coerceAtMost(queue.size), item)
                 try {
-                    player?.addMediaItem(idx.coerceAtMost(queue.size - 1).coerceAtLeast(0), item)
+                    player?.addMediaItem(
+                        idx.coerceAtMost(queue.size - 1).coerceAtLeast(0),
+                        item
+                    )
                 } catch (_: Exception) {}
                 idx += 1
             }
@@ -580,23 +786,23 @@ com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.
                 player?.prepare()
             } catch (_: Exception) {}
             queueTracks.postValue(
-                    queue.map { mi ->
-                        val meta = mi.mediaMetadata
-                        val id =
-                                try {
-                                    mi.localConfiguration?.tag as? String ?: ""
-                                } catch (_: Exception) {
-                                    ""
-                                }
-                        com.example.moniq.model.Track(
-                                id,
-                                meta?.title?.toString() ?: "",
-                                meta?.artist?.toString() ?: "",
-                                0,
-                                albumId = null,
-                                coverArtId = meta?.artworkUri?.toString()
-                        )
-                    }
+                queue.map { mi ->
+                    val meta = mi.mediaMetadata
+                    val id =
+                        try {
+                            mi.localConfiguration?.tag as? String ?: ""
+                        } catch (_: Exception) {
+                            ""
+                        }
+                    com.example.moniq.model.Track(
+                        id,
+                        meta?.title?.toString() ?: "",
+                        meta?.artist?.toString() ?: "",
+                        0,
+                        albumId = null,
+                        coverArtId = meta?.artworkUri?.toString()
+                    )
+                }
             )
         } catch (_: Exception) {}
     }
@@ -625,29 +831,23 @@ com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.
                     if (!tr.albumName.isNullOrBlank()) setAlbumTitle(tr.albumName)
                     val coverId = tr.coverArtId ?: tr.albumId ?: tr.id
                     if (!coverId.isNullOrEmpty() && SessionManager.host != null) {
-                    val art =
-                        android.net.Uri.parse(SessionManager.host)
-                            .buildUpon()
-                            .appendPath("rest")
-                            .appendPath("getCoverArt.view")
-                            .appendQueryParameter("id", coverId)
-                            .appendQueryParameter(
-                                "u",
-                                SessionManager.username ?: ""
-                            )
-                            .appendQueryParameter(
-                                "p",
-                                SessionManager.password ?: ""
-                            )
-                            .build()
-                    setArtworkUri(art)
+                        val art =
+                            android.net.Uri.parse(SessionManager.host)
+                                .buildUpon()
+                                .appendPath("rest")
+                                .appendPath("getCoverArt.view")
+                                .appendQueryParameter("id", coverId)
+                                .appendQueryParameter("u", SessionManager.username ?: "")
+                                .appendQueryParameter("p", SessionManager.password ?: "")
+                                .build()
+                        setArtworkUri(art)
                     }
                     try {
-                    val extras = android.os.Bundle()
-                    tr.albumId?.let { extras.putString("albumId", it) }
-                    tr.albumName?.let { extras.putString("albumName", it) }
-                    extras.putString("trackArtist", tr.artist)
-                    setExtras(extras)
+                        val extras = android.os.Bundle()
+                        tr.albumId?.let { extras.putString("albumId", it) }
+                        tr.albumName?.let { extras.putString("albumName", it) }
+                        extras.putString("trackArtist", tr.artist)
+                        setExtras(extras)
                     } catch (_: Exception) {}
                 }
                 .build()
@@ -676,84 +876,84 @@ com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.
 
             // update live data
             queueTracks.postValue(
-                    queue.map { mi ->
-                        val meta = mi.mediaMetadata
-                        val id =
-                                try {
-                                    mi.localConfiguration?.tag as? String ?: ""
-                                } catch (_: Exception) {
-                                    ""
-                                }
-                        com.example.moniq.model.Track(
-                                id,
-                                meta?.title?.toString() ?: "",
-                                meta?.artist?.toString() ?: "",
-                                0,
-                                albumId = null,
-                                coverArtId = meta?.artworkUri?.toString()
-                        )
-                    }
+                queue.map { mi ->
+                    val meta = mi.mediaMetadata
+                    val id =
+                        try {
+                            mi.localConfiguration?.tag as? String ?: ""
+                        } catch (_: Exception) {
+                            ""
+                        }
+                    com.example.moniq.model.Track(
+                        id,
+                        meta?.title?.toString() ?: "",
+                        meta?.artist?.toString() ?: "",
+                        0,
+                        albumId = null,
+                        coverArtId = meta?.artworkUri?.toString()
+                    )
+                }
             )
             currentQueueIndex.postValue(player?.currentMediaItemIndex ?: 0)
         } catch (_: Exception) {}
     }
 
-   fun playTrack(
-            context: Context,
-            trackId: String,
-            title: String? = null,
-            artist: String? = null,
-            albumArt: String? = null,
-            albumId: String? = null,
-            albumName: String? = null
+    fun playTrack(
+        context: Context,
+        trackId: String,
+        title: String? = null,
+        artist: String? = null,
+        albumArt: String? = null,
+        albumId: String? = null,
+        albumName: String? = null
     ) {
         currentTrackId = trackId
         // Play a single track by creating a one-item queue so next/prev work properly
         val temp =
-                com.example.moniq.model.Track(
-                        trackId,
-                        title ?: "",
-                        artist ?: "",
-                        0,
-                        albumId = albumId,
-                        albumName = albumName,
-                        coverArtId = albumArt
-                )
+            com.example.moniq.model.Track(
+                trackId,
+                title ?: "",
+                artist ?: "",
+                0,
+                albumId = albumId,
+                albumName = albumName,
+                coverArtId = albumArt
+            )
         setQueue(listOf(temp), 0)
         // avoid adding an empty-cover duplicate here; setQueue already records the played track
         // with available metadata
     }
 
     fun playTrack(
-            trackId: String,
-            title: String? = null,
-            artist: String? = null,
-            albumArt: String? = null,
-            albumId: String? = null,
-            albumName: String? = null
+        trackId: String,
+        title: String? = null,
+        artist: String? = null,
+        albumArt: String? = null,
+        albumId: String? = null,
+        albumName: String? = null
     ) {
         val ctx = appContext ?: return
         playTrack(ctx, trackId, title, artist, albumArt, albumId, albumName)
     }
 
     fun playStream(
-            context: Context,
-            url: String,
-            title: String? = null,
-            artist: String? = null,
-            albumArt: String? = null
+        context: Context,
+        url: String,
+        title: String? = null,
+        artist: String? = null,
+        albumArt: String? = null
     ) {
         initialize(context)
         player?.apply {
             val meta =
-                    MediaMetadata.Builder()
-                            .apply {
-                                if (!title.isNullOrEmpty()) setTitle(title)
-                                if (!artist.isNullOrEmpty()) setArtist(artist)
-                                if (!albumArt.isNullOrEmpty())
-                                        setArtworkUri(android.net.Uri.parse(albumArt))
-                            }
-                            .build()
+                MediaMetadata.Builder()
+                    .apply {
+                        if (!title.isNullOrEmpty()) setTitle(title)
+                        if (!artist.isNullOrEmpty()) setArtist(artist)
+                        if (!albumArt.isNullOrEmpty())
+                            setArtworkUri(android.net.Uri.parse(albumArt))
+                    }
+                    .build()
             val mediaItem = MediaItem.Builder().setUri(url).setMediaMetadata(meta).build()
             setMediaItem(mediaItem)
             prepare()
@@ -765,10 +965,10 @@ com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.
     }
 
     fun playStream(
-            url: String,
-            title: String? = null,
-            artist: String? = null,
-            albumArt: String? = null
+        url: String,
+        title: String? = null,
+        artist: String? = null,
+        albumArt: String? = null
     ) {
         val ctx = appContext ?: return
         playStream(ctx, url, title, artist, albumArt)
@@ -778,27 +978,33 @@ com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.
         val p = player ?: return
         if (p.isPlaying) p.pause() else p.play()
     }
+    
     fun pause() {
         player?.pause()
     }
+    
     fun resume() {
         player?.play()
     }
+    
     fun next() {
         try {
             player?.seekToNextMediaItem()
         } catch (_: Exception) {}
     }
+    
     fun previous() {
         try {
             player?.seekToPreviousMediaItem()
         } catch (_: Exception) {}
     }
+    
     fun seekTo(ms: Long) {
         try {
             player?.seekTo(ms)
         } catch (_: Exception) {}
     }
+    
     fun seekRelative(deltaMs: Long) {
         try {
             val p = player ?: return
@@ -808,13 +1014,23 @@ com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.
             p.seekTo(final)
         } catch (_: Exception) {}
     }
+    
     fun currentPosition(): Long {
         return player?.currentPosition ?: 0L
     }
+    
     fun duration(): Long {
         return player?.duration ?: 0L
     }
+    
     fun release() {
+        scrobbleJob?.cancel()
+        scrobbleJob = null
+
+        // Cancel all coroutines
+        coroutineScope?.cancel()
+        coroutineScope = null
+
         try {
             playerNotificationManager?.setPlayer(null)
         } catch (_: Exception) {}
@@ -836,93 +1052,100 @@ com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.
             val nm = notificationManager ?: return
             val chan = "moniq_playback_channel"
             val builder =
-                    androidx.core.app.NotificationCompat.Builder(ctx, chan)
-                            .setSmallIcon(R.mipmap.ic_launcher)
-                            .setContentTitle(currentTitle.value ?: "")
-                            .setContentText(currentArtist.value ?: "")
-                            .setOnlyAlertOnce(true)
-                            .setOngoing(true)
+                androidx.core.app.NotificationCompat.Builder(ctx, chan)
+                    .setSmallIcon(R.mipmap.ic_launcher)
+                    .setContentTitle(currentTitle.value ?: "")
+                    .setContentText(currentArtist.value ?: "")
+                    .setOnlyAlertOnce(true)
+                    .setOngoing(true)
 
-                // Use a single compact notification layout with actions: Prev, Play/Pause, Next, Queue
-                val prevIntent =
-                    android.content.Intent(ctx, NotificationActionReceiver::class.java).apply {
+            // Use a single compact notification layout with actions: Prev, Play/Pause, Next,
+            // Queue
+            val prevIntent =
+                android.content.Intent(ctx, NotificationActionReceiver::class.java).apply {
                     action = NotificationActionReceiver.ACTION_PREV
-                    }
-                val prevPi =
-                    android.app.PendingIntent.getBroadcast(
-                        ctx,
-                        101,
-                        prevIntent,
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or
-                            android.app.PendingIntent.FLAG_IMMUTABLE
-                    )
-                builder.addAction(0, "Prev", prevPi)
+                }
+            val prevPi =
+                android.app.PendingIntent.getBroadcast(
+                    ctx,
+                    101,
+                    prevIntent,
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                        android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+            builder.addAction(0, "Prev", prevPi)
 
-                val toggleIntent =
-                    android.content.Intent(ctx, NotificationActionReceiver::class.java).apply {
+            val toggleIntent =
+                android.content.Intent(ctx, NotificationActionReceiver::class.java).apply {
                     action = NotificationActionReceiver.ACTION_TOGGLE_PLAY
-                    }
-                val togglePi =
-                    android.app.PendingIntent.getBroadcast(
-                        ctx,
-                        102,
-                        toggleIntent,
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or
-                            android.app.PendingIntent.FLAG_IMMUTABLE
-                    )
-                val playLabel = if (isPlaying.value == true) "Pause" else "Play"
-                builder.addAction(0, playLabel, togglePi)
+                }
+            val togglePi =
+                android.app.PendingIntent.getBroadcast(
+                    ctx,
+                    102,
+                    toggleIntent,
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                        android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+            val playLabel = if (isPlaying.value == true) "Pause" else "Play"
+            builder.addAction(0, playLabel, togglePi)
 
-                val nextIntent =
-                    android.content.Intent(ctx, NotificationActionReceiver::class.java).apply {
+            val nextIntent =
+                android.content.Intent(ctx, NotificationActionReceiver::class.java).apply {
                     action = NotificationActionReceiver.ACTION_NEXT
-                    }
-                val nextPi =
-                    android.app.PendingIntent.getBroadcast(
-                        ctx,
-                        103,
-                        nextIntent,
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or
-                            android.app.PendingIntent.FLAG_IMMUTABLE
-                    )
-                builder.addAction(0, "Next", nextPi)
+                }
+            val nextPi =
+                android.app.PendingIntent.getBroadcast(
+                    ctx,
+                    103,
+                    nextIntent,
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                        android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+            builder.addAction(0, "Next", nextPi)
 
-                // action to open the Queue view
-                val queueAct =
-                    android.content.Intent(ctx, com.example.moniq.QueueActivity::class.java).apply {
-                    flags = android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                        android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                val queuePi =
-                    android.app.PendingIntent.getActivity(
-                        ctx,
-                        110,
-                        queueAct,
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or
-                            android.app.PendingIntent.FLAG_IMMUTABLE
-                    )
-                builder.addAction(0, "Queue", queuePi)
+            // action to open the Queue view
+            val queueAct =
+                android.content.Intent(ctx, com.example.moniq.QueueActivity::class.java).apply {
+                    flags =
+                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                            android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+            val queuePi =
+                android.app.PendingIntent.getActivity(
+                    ctx,
+                    110,
+                    queueAct,
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                        android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+            builder.addAction(0, "Queue", queuePi)
 
-                // tapping notification opens QueueActivity as well
-                builder.setContentIntent(queuePi)
+            // tapping notification opens QueueActivity as well
+            builder.setContentIntent(queuePi)
 
-                // attach compact custom content view (cover, title, subtitle)
-                val rv = RemoteViews(ctx.packageName, R.layout.notification_media_compact)
-                rv.setTextViewText(R.id.notif_title, currentTitle.value ?: "")
-                // show "Artist — Album" when possible
-                val artistText = currentArtist.value ?: ""
-                val albumText = currentAlbumName.value ?: ""
-                val subtitle = if (!albumText.isNullOrBlank()) "$artistText — $albumText" else artistText
-                rv.setTextViewText(R.id.notif_subtitle, subtitle)
-                try {
+            // attach compact custom content view (cover, title, subtitle)
+            val rv = RemoteViews(ctx.packageName, R.layout.notification_media_compact)
+            rv.setTextViewText(R.id.notif_title, currentTitle.value ?: "")
+            // show "Artist — Album" when possible
+            val artistText = currentArtist.value ?: ""
+            val albumText = currentAlbumName.value ?: ""
+            val subtitle =
+                if (!albumText.isNullOrBlank()) "$artistText — $albumText" else artistText
+            rv.setTextViewText(R.id.notif_subtitle, subtitle)
+            try {
                 rv.setImageViewResource(R.id.notif_cover, R.mipmap.ic_launcher)
-                } catch (_: Exception) {}
-                builder.setCustomContentView(rv)
+            } catch (_: Exception) {}
+            builder.setCustomContentView(rv)
 
             // If we have a cached bitmap from a previous fetch, reuse it to avoid flicker
             if (lastNotifiedBitmap != null) {
-                try { builder.setLargeIcon(lastNotifiedBitmap) } catch (_: Exception) {}
-                try { rv.setImageViewBitmap(R.id.notif_cover, lastNotifiedBitmap) } catch (_: Exception) {}
+                try {
+                    builder.setLargeIcon(lastNotifiedBitmap)
+                } catch (_: Exception) {}
+                try {
+                    rv.setImageViewBitmap(R.id.notif_cover, lastNotifiedBitmap)
+                } catch (_: Exception) {}
             }
             val notif = builder.build()
             nm.notify(1, notif)
@@ -930,78 +1153,93 @@ com.example.moniq.SessionStore.saveLastTrack(appContext!!, trId, 0L, firstMeta?.
             // Asynchronously fetch album art and update notification large icon when available
             try {
                 val artSrc: String? =
-                        if (!currentAlbumArt.value.isNullOrBlank()) {
-                            currentAlbumArt.value
-                        } else {
-                            val id = currentTrackId
-                            val host = SessionManager.host
-                            if (id.isNullOrBlank() || host.isNullOrBlank() || id.startsWith("http"))
-                                    null
-                            else
-                                    android.net.Uri.parse(host)
-                                            .buildUpon()
-                                            .appendPath("rest")
-                                            .appendPath("getCoverArt.view")
-                                            .appendQueryParameter("id", id)
-                                            .appendQueryParameter(
-                                                    "u",
-                                                    SessionManager.username ?: ""
-                                            )
-                                            .appendQueryParameter(
-                                                    "p",
-                                                    SessionManager.password ?: ""
-                                            )
-                                            .build()
-                                            .toString()
-                        }
+                    if (!currentAlbumArt.value.isNullOrBlank()) {
+                        currentAlbumArt.value
+                    } else {
+                        val id = currentTrackId
+                        val host = SessionManager.host
+                        if (id.isNullOrBlank() || host.isNullOrBlank() || id.startsWith("http"))
+                            null
+                        else
+                            android.net.Uri.parse(host)
+                                .buildUpon()
+                                .appendPath("rest")
+                                .appendPath("getCoverArt.view")
+                                .appendQueryParameter("id", id)
+                                .appendQueryParameter("u", SessionManager.username ?: "")
+                                .appendQueryParameter("p", SessionManager.password ?: "")
+                                .build()
+                                .toString()
+                    }
                 if (!artSrc.isNullOrBlank() && artSrc != lastNotifiedArtSrc) {
                     lastNotifiedArtSrc = artSrc
                     Thread {
-                                try {
-                                    val conn = java.net.URL(artSrc).openConnection()
-                                    conn.connectTimeout = 5000
-                                    conn.readTimeout = 5000
-                                    val stream = conn.getInputStream()
-                                    val bytes = stream.readBytes()
-                                    stream.close()
-                                    val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                                    if (bmp != null) {
-                                        lastNotifiedBitmap = bmp
+                            try {
+                                val conn = java.net.URL(artSrc).openConnection()
+                                conn.connectTimeout = 5000
+                                conn.readTimeout = 5000
+                                val stream = conn.getInputStream()
+                                val bytes = stream.readBytes()
+                                stream.close()
+                                val bmp =
+                                    android.graphics.BitmapFactory.decodeByteArray(
+                                        bytes,
+                                        0,
+                                        bytes.size
+                                    )
+                                if (bmp != null) {
+                                    lastNotifiedBitmap = bmp
+                                    try {
+                                        builder.setLargeIcon(bmp)
                                         try {
-                                            builder.setLargeIcon(bmp)
-                                            try {
-                                                rv.setImageViewBitmap(R.id.notif_cover, bmp)
-                                                builder.setCustomContentView(rv)
-                                            } catch (_: Exception) {}
-                                            nm.notify(1, builder.build())
+                                            rv.setImageViewBitmap(R.id.notif_cover, bmp)
+                                            builder.setCustomContentView(rv)
                                         } catch (_: Exception) {}
-                                    }
-                                } catch (_: Exception) {}
-                            }
-                            .start()
+                                        nm.notify(1, builder.build())
+                                    } catch (_: Exception) {}
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        .start()
                 }
             } catch (_: Exception) {}
         } catch (_: Exception) {}
     }
 
     fun restoreLast(context: Context) {
-    try {
-        val last = com.example.moniq.SessionStore.loadLastTrack(context) ?: return
-        val tr = com.example.moniq.model.Track(last.id, last.title ?: "", last.artist ?: "", 0, albumId = last.albumId, albumName = last.albumName, coverArtId = last.artUrl)
-        initialize(context)
-        val item = buildMediaItemForTrack(tr)
-        queue.clear()
-        queue.add(item)
-        player?.setMediaItems(queue, 0, last.posMs)
-        player?.prepare()
-        try { player?.pause() } catch (_: Exception) {}
-        currentTrackId = last.id
-        currentTitle.postValue(last.title)
-        currentArtist.postValue(last.artist)
-        currentAlbumArt.postValue(last.artUrl)
-        currentAlbumName.postValue(last.albumName)
-        currentAlbumId.postValue(last.albumId)
-        isPlaying.postValue(false)
-    } catch (_: Exception) {}
-}
+        try {
+            val last = com.example.moniq.SessionStore.loadLastTrack(context) ?: return
+            val tr =
+                com.example.moniq.model.Track(
+                    last.id,
+                    last.title ?: "",
+                    last.artist ?: "",
+                    0,
+                    albumId = last.albumId,
+                    albumName = last.albumName,
+                    coverArtId = last.artUrl
+                )
+            initialize(context)
+            val item = buildMediaItemForTrack(tr)
+            queue.clear()
+            queue.add(item)
+            player?.setMediaItems(queue, 0, last.posMs)
+            player?.prepare()
+            try {
+                player?.pause()
+            } catch (_: Exception) {}
+            currentTrackId = last.id
+            currentTitle.postValue(last.title)
+            currentArtist.postValue(last.artist)
+            currentAlbumArt.postValue(last.artUrl)
+            currentAlbumName.postValue(last.albumName)
+            currentAlbumId.postValue(last.albumId)
+            isPlaying.postValue(false)
+
+            // Prevent scrobbling restored tracks by marking them as already scrobbled
+        try {
+            com.example.moniq.lastfm.LastFmManager.resetScrobbleState()
+        } catch (_: Exception) {}
+        } catch (_: Exception) {}
+    }
 }

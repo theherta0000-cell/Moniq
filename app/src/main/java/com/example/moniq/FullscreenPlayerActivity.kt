@@ -43,8 +43,9 @@ class FullscreenPlayerActivity : ComponentActivity() {
     val durSec = (AudioPlayer.duration() / 1000).toInt()
     if (title == null || artist == null) return
     
-    val cacheKey = "$title|$artist|$album"
-    
+val cacheKey = "$title|$artist|$album"
+
+
     // Check if already loaded in this activity instance
     if (lyricsLoadedFor == cacheKey) return
     
@@ -313,10 +314,6 @@ private fun showEditSearchDialog(title: String?, artist: String?, album: String?
         val queueBtn = findViewById<MaterialButton>(R.id.full_queue)
 
         // Observe player metadata
-        AudioPlayer.currentTitle.observe(this) { t ->
-            titleView?.text = t ?: ""
-        }
-
         AudioPlayer.currentArtist.observe(this) { a -> artistView?.text = a ?: "" }
 
         // Also observe currentAlbumArt and load it for fullscreen view with rounded corners and size limit
@@ -357,6 +354,23 @@ private fun showEditSearchDialog(title: String?, artist: String?, album: String?
                 }
             }
         }
+
+        // Observe track changes to refresh lyrics
+        AudioPlayer.currentTitle.observe(this) { title ->
+    titleView?.text = title ?: ""
+    // Reset lyrics cache key when track changes
+    val toggleLyrics = findViewById<MaterialButton>(R.id.full_toggle_lyrics)
+    if (toggleLyrics?.isChecked == true) {
+        // Only auto-reload if lyrics overlay is currently visible
+        lyricsLoadedFor = null
+        val lyricsView = findViewById<View>(R.id.full_lyrics_view)
+        // Add a small delay to allow all metadata (title, artist, album) to update
+        lifecycleScope.launch {
+            delay(100)
+            try { loadLyricsIfNeeded(lyricsView) } catch (_: Exception) {}
+        }
+    }
+}
 
         AudioPlayer.isPlaying.observe(this) { playing -> 
             val icon = if (playing == true) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play

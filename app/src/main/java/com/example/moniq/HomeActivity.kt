@@ -168,7 +168,7 @@ class HomeActivity : ComponentActivity() {
                     .appendQueryParameter("p", SessionManager.password ?: "")
                     .build().toString()
             } else null
-            AudioPlayer.playTrack(this@HomeActivity, t.id, t.title, t.artist, albumArtUrl)
+            AudioPlayer.playTrack(this@HomeActivity, t.id, t.title, t.artist, albumArtUrl, t.albumId, t.albumName)
         }, onDownload = { t ->
             lifecycleScope.launch {
                 val coverId = t.coverArtId ?: t.albumId ?: t.id

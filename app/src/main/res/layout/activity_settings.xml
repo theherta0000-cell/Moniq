@@ -2,7 +2,8 @@
 <androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="?android:attr/colorBackground">
     <androidx.appcompat.widget.Toolbar
         android:id="@+id/settingsToolbar"
         android:layout_width="match_parent"
@@ -14,7 +15,8 @@
         android:layout_height="match_parent"
         android:orientation="vertical"
         android:padding="16dp"
-        android:layout_marginTop="56dp">
+        android:layout_marginTop="56dp"
+        android:background="?android:attr/colorBackground"> 
         <TextView
             android:id="@+id/settings_speed_label"
             android:layout_width="wrap_content"
@@ -30,11 +32,12 @@
             android:valueTo="200"
             android:stepSize="1"
             android:thumbTint="@color/purple_500" />
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Note: pitch will change automatically with speed." />
+       <TextView
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="16dp"
+    android:text="Note: pitch will change automatically with speed."
+    android:textColor="?android:attr/textColorSecondary" />
         
         <!-- Lyrics Display Settings -->
         <TextView
@@ -85,24 +88,26 @@
         </LinearLayout>
         
         <TextView
-            android:id="@+id/settings_download_label"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="Download directory" />
+    android:id="@+id/settings_download_label"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="24dp"
+    android:text="Download directory"
+    android:textColor="?android:attr/textColorPrimary" />
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:layout_marginTop="8dp">
             <TextView
-                android:id="@+id/settings_download_value"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Default"
-                android:ellipsize="end"
-                android:maxLines="1" />
+    android:id="@+id/settings_download_value"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_weight="1"
+    android:text="Default"
+    android:ellipsize="end"
+    android:maxLines="1"
+    android:textColor="?android:attr/textColorPrimary" />
             <Button
                 android:id="@+id/settings_choose_download_button"
                 android:layout_width="wrap_content"
@@ -115,15 +120,57 @@
             android:orientation="horizontal"
             android:layout_marginTop="16dp">
             <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Theme" />
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_weight="1"
+    android:text="Theme"
+    android:textColor="?android:attr/textColorPrimary" />
             <Button
                 android:id="@+id/settings_theme_button"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="System" />
+</LinearLayout>
+
+<!-- Last.fm Section -->
+<TextView
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="24dp"
+    android:text="Last.fm Scrobbling"
+    android:textStyle="bold"
+    android:textSize="16sp"
+    android:textColor="?android:attr/textColorPrimary" />
+
+<TextView
+    android:id="@+id/settings_lastfm_status"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="8dp"
+    android:text="Not connected"
+    android:textColor="?android:attr/textColorSecondary" />
+
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:layout_marginTop="8dp">
+    <Button
+        android:id="@+id/settings_lastfm_login_button"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginEnd="8dp"
+        android:text="Connect" />
+    <Button
+        android:id="@+id/settings_lastfm_logout_button"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="Disconnect"
+        android:enabled="false" />
+
+        
         </LinearLayout>
         <Button
             android:id="@+id/settings_disconnect_button"

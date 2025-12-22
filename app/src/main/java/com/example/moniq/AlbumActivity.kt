@@ -49,18 +49,20 @@ class AlbumActivity : ComponentActivity() {
         val tracksRecycler = findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.tracksRecycler)
         var currentTracks: List<Track> = emptyList()
         val trackAdapter = com.example.moniq.adapters.TrackAdapter(emptyList(), onPlay = { track, pos ->
-            AudioPlayer.initialize(this@AlbumActivity)
-            if (currentTracks.isNotEmpty()) {
-                AudioPlayer.setQueue(currentTracks, pos)
-            } else {
-                lifecycleScope.launch {
-                    val repo = MusicRepository()
-                    val tracks: List<Track> = repo.getAlbumTracks(albumId)
-                    currentTracks = tracks
-                    AudioPlayer.setQueue(tracks, pos)
-                }
-            }
-        }, onDownload = { track ->
+    AudioPlayer.initialize(this@AlbumActivity)
+    if (currentTracks.isNotEmpty()) {
+        val tracksWithAlbum = currentTracks.map { it.copy(albumId = albumId, albumName = albumTitle) }
+        AudioPlayer.setQueue(tracksWithAlbum, pos)
+    } else {
+        lifecycleScope.launch {
+            val repo = MusicRepository()
+            val tracks: List<Track> = repo.getAlbumTracks(albumId)
+            currentTracks = tracks
+            val tracksWithAlbum = tracks.map { it.copy(albumId = albumId, albumName = albumTitle) }
+            AudioPlayer.setQueue(tracksWithAlbum, pos)
+        }
+    }
+}, onDownload = { track ->
             lifecycleScope.launch {
                 val ok = com.example.moniq.player.DownloadManager.downloadTrack(
                     this@AlbumActivity, track.id, track.title, track.artist, albumTitle, null
@@ -155,11 +157,12 @@ class AlbumActivity : ComponentActivity() {
             }
 
             val playAllBtn = findViewById<MaterialButton>(R.id.playAllButton)
-            playAllBtn.setOnClickListener {
-                if (tracks.isNotEmpty()) {
-                    AudioPlayer.setQueue(tracks, 0)
-                }
-            }
+playAllBtn.setOnClickListener {
+    if (tracks.isNotEmpty()) {
+        val tracksWithAlbum = tracks.map { it.copy(albumId = albumId, albumName = albumTitle) }
+        AudioPlayer.setQueue(tracksWithAlbum, 0)
+    }
+}
         }
 
         // Miniplayer wiring
