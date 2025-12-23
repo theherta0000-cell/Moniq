@@ -1,4 +1,10 @@
-welcome to moniq
+[Homepage](Homepage.jpg)
+[Search Results](Search.jpg)
+[Album Page](AlbumView.jpg)
+[Artist Page](ArtistView.jpg)
+[Fullscreen Player](FullscreenPlayer.jpg)
+[Lyrics](LYRICS.jpg)
 
+Moniq, a OpenSubsonic client which supports servers that use legacy authentication. 
 
-i am not responsible for anything here if you have a problem please contact the providers/3rd party's
+Moniq does not in any way take responsibility for any 3rd party sources/links used. Any complaints should be taken up with the 3rd party source themself.
