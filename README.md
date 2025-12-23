@@ -1,9 +1,9 @@
-[Homepage](Homepage.jpg)
-[Search Results](Search.jpg)
-[Album Page](AlbumView.jpg)
-[Artist Page](ArtistView.jpg)
-[Fullscreen Player](FullscreenPlayer.jpg)
-[Lyrics](LYRICS.jpg)
+![Homepage](Homepage.jpg)
+![Search Results](Search.jpg)
+![Album Page](AlbumView.jpg)
+![Artist Page](ArtistView.jpg)
+![Fullscreen Player](FullscreenPlayer.jpg)
+![Lyrics](LYRICS.jpg)
 
 Moniq, a OpenSubsonic client which supports servers that use legacy authentication. 
 
