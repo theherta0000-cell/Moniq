@@ -1,9 +1,5 @@
-![Homepage](Homepage.jpg)
-![Search Results](Search.jpg)
-![Album Page](AlbumView.jpg)
-![Artist Page](ArtistView.jpg)
-![Fullscreen Player](FullscreenPlayer.jpg)
-![Lyrics](LYRICS.jpg)
+![Homepage](Homepage.jpg) ![Search Results](Search.jpg) ![Album Page](AlbumView.jpg) ![Artist Page](ArtistView.jpg) ![Fullscreen Player](FullscreenPlayer.jpg) ![Lyrics](LYRICS.jpg)
+This is of version 1.3.0. **UI is subject to change.**
 
 Moniq, a OpenSubsonic client which supports servers that use legacy authentication. 
 
