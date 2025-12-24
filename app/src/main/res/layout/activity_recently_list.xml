@@ -3,13 +3,11 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#0F1722">
-
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:padding="16dp">
-
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -18,7 +16,8 @@
             android:textSize="20sp"
             android:textStyle="bold"
             android:layout_marginBottom="8dp" />
-
+        
+        <!-- Tracks Section -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -26,12 +25,21 @@
             android:textColor="#B0FFFFFF"
             android:layout_marginTop="8dp"
             android:layout_marginBottom="4dp" />
-
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/recent_list_tracks"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
-
+        <Button
+            android:id="@+id/btn_show_more_tracks"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Show More"
+            android:textColor="#FFFFFFFF"
+            android:background="?attr/selectableItemBackground"
+            android:layout_gravity="center_horizontal"
+            android:visibility="gone" />
+        
+        <!-- Artists Section -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -39,12 +47,21 @@
             android:textColor="#B0FFFFFF"
             android:layout_marginTop="12dp"
             android:layout_marginBottom="4dp" />
-
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/recent_list_artists"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
-
+        <Button
+            android:id="@+id/btn_show_more_artists"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Show More"
+            android:textColor="#FFFFFFFF"
+            android:background="?attr/selectableItemBackground"
+            android:layout_gravity="center_horizontal"
+            android:visibility="gone" />
+        
+        <!-- Albums Section -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -52,12 +69,18 @@
             android:textColor="#B0FFFFFF"
             android:layout_marginTop="12dp"
             android:layout_marginBottom="4dp" />
-
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/recent_list_albums"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
-
+        <Button
+            android:id="@+id/btn_show_more_albums"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Show More"
+            android:textColor="#FFFFFFFF"
+            android:background="?attr/selectableItemBackground"
+            android:layout_gravity="center_horizontal"
+            android:visibility="gone" />
     </LinearLayout>
-
 </ScrollView>

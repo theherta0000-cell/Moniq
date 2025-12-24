@@ -111,42 +111,42 @@ class RecentlyPlayedManager(private val ctx: Context) {
     }
 
     private fun trackToJson(t: Track): JSONObject {
-        val o = JSONObject()
-        o.put("id", t.id)
-        o.put("title", t.title)
-        o.put("artist", t.artist)
-        o.put("albumId", t.albumId)
-        // ADD ALBUM NAME
-        o.put("albumName", t.albumName)
-        // Normalize coverArtId to an absolute URL when possible so recent items always show covers
-        val cover = when {
-            t.coverArtId.isNullOrBlank() -> null
-            t.coverArtId.startsWith("http") -> t.coverArtId
-            SessionManager.host != null -> android.net.Uri.parse(SessionManager.host).buildUpon()
-                .appendPath("rest").appendPath("getCoverArt.view")
-                .appendQueryParameter("id", t.coverArtId)
-                .appendQueryParameter("u", SessionManager.username ?: "")
-                .appendQueryParameter("p", SessionManager.password ?: "")
-                .build().toString()
-            else -> t.coverArtId
-        }
-        o.put("coverArtId", cover)
-        return o
+    val o = JSONObject()
+    o.put("id", t.id)
+    o.put("title", t.title)
+    o.put("artist", t.artist)
+    o.put("albumId", t.albumId)
+    o.put("albumName", t.albumName)
+    o.put("durationSec", t.durationSec)  // ADD THIS LINE
+    // Normalize coverArtId to an absolute URL when possible so recent items always show covers
+    val cover = when {
+        t.coverArtId.isNullOrBlank() -> null
+        t.coverArtId.startsWith("http") -> t.coverArtId
+        SessionManager.host != null -> android.net.Uri.parse(SessionManager.host).buildUpon()
+            .appendPath("rest").appendPath("getCoverArt.view")
+            .appendQueryParameter("id", t.coverArtId)
+            .appendQueryParameter("u", SessionManager.username ?: "")
+            .appendQueryParameter("p", SessionManager.password ?: "")
+            .build().toString()
+        else -> t.coverArtId
     }
+    o.put("coverArtId", cover)
+    return o
+}
 
     private fun jsonToTrack(o: JSONObject): Track? {
     val id = o.optString("id", null) ?: return null
     val title = o.optString("title", "")
     val artist = o.optString("artist", "")
     val albumId = o.optString("albumId", null)
-    // READ ALBUM NAME
     val albumName = o.optString("albumName", null)
     val coverArt = o.optString("coverArtId", null)
+    val durationSec = o.optInt("durationSec", 0)  // READ THE DURATION
     return Track(
         id = id,
         title = title,
         artist = artist,
-        durationSec = 0,  // Changed from "duration" to "durationSec"
+        durationSec = durationSec,  // USE THE DURATION
         albumId = albumId,
         albumName = albumName,
         coverArtId = coverArt

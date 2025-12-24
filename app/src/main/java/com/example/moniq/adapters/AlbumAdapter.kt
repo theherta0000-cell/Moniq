@@ -19,7 +19,8 @@ import com.example.moniq.model.Album
 class AlbumAdapter(
     var items: List<Album>,
     private val onClick: (Album) -> Unit,
-    private val compact: Boolean = false
+    private val compact: Boolean = false,
+    private val onLongClick: ((Album) -> Unit)? = null
 ) : RecyclerView.Adapter<AlbumAdapter.VH>() {
 
     class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -59,6 +60,14 @@ class AlbumAdapter(
             holder.image.setImageResource(android.R.drawable.ic_menu_report_image)
         }
         holder.itemView.setOnClickListener { onClick(alb) }
+        
+        // Simple long click for compact mode to go to artist
+        if (compact && onLongClick != null) {
+            holder.itemView.setOnLongClickListener {
+                onLongClick.invoke(alb)
+                true
+            }
+        }
 
         // Album duration: compute by summing track durations (cached)
         try {

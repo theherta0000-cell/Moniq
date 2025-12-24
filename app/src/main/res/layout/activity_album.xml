@@ -55,15 +55,25 @@
                     android:maxLines="1" />
 
                 <TextView
-                    android:id="@+id/albumArtist"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Artist"
-                    android:textSize="14sp"
-                    android:textColor="#DDDDDD"
-                    android:layout_marginTop="4dp" />
+    android:id="@+id/albumArtist"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:text="Artist"
+    android:textSize="14sp"
+    android:textColor="#DDDDDD"
+    android:layout_marginTop="4dp" />
 
-            </LinearLayout>
+<TextView
+    android:id="@+id/albumQuality"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:text="FLAC • 320 kbps • 44.1 kHz"
+    android:textSize="11sp"
+    android:textColor="#AAAAAA"
+    android:layout_marginTop="2dp"
+    android:visibility="gone" />
+
+</LinearLayout>
 
             <androidx.appcompat.widget.Toolbar
                 android:id="@+id/toolbar"

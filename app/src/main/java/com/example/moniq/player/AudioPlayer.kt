@@ -20,6 +20,7 @@ import com.example.moniq.util.Crypto
 import java.net.URLEncoder
 import kotlinx.coroutines.*
 import android.util.Log
+import com.example.moniq.util.MetadataFetcher
 
 object AudioPlayer {
     private var player: ExoPlayer? = null
@@ -503,6 +504,16 @@ scrobbleJob = coroutineScope?.launch(Dispatchers.IO) {
     fun setQueue(tracks: List<com.example.moniq.model.Track>, startIndex: Int = 0) {
         val ctx = appContext ?: return
         initialize(ctx)
+        
+        // Launch coroutine to enrich metadata before building queue
+        coroutineScope?.launch {
+            val enrichedTracks = MetadataFetcher.enrichTracksMetadata(tracks)
+            setQueueInternal(enrichedTracks, startIndex)
+        }
+    }
+    
+    private fun setQueueInternal(tracks: List<com.example.moniq.model.Track>, startIndex: Int = 0) {
+        val ctx = appContext ?: return
         val host = SessionManager.host ?: return
         val username = SessionManager.username ?: ""
         val passwordRaw = SessionManager.password ?: ""
@@ -692,9 +703,19 @@ scrobbleJob = coroutineScope?.launch(Dispatchers.IO) {
     }
 
     // Append a single track to the end of the queue
+    // Append a single track to the end of the queue
     fun addToQueue(track: com.example.moniq.model.Track) {
         try {
             initialize(appContext ?: return)
+            coroutineScope?.launch {
+                val enriched = MetadataFetcher.enrichTrackMetadata(track)
+                addToQueueInternal(enriched)
+            }
+        } catch (_: Exception) {}
+    }
+    
+    private fun addToQueueInternal(track: com.example.moniq.model.Track) {
+        try {
             val item = buildMediaItemForTrack(track)
             queue.add(item)
             try {
@@ -730,6 +751,15 @@ scrobbleJob = coroutineScope?.launch(Dispatchers.IO) {
     fun playNext(track: com.example.moniq.model.Track) {
         try {
             initialize(appContext ?: return)
+            coroutineScope?.launch {
+                val enriched = MetadataFetcher.enrichTrackMetadata(track)
+                playNextInternal(enriched)
+            }
+        } catch (_: Exception) {}
+    }
+    
+    private fun playNextInternal(track: com.example.moniq.model.Track) {
+        try {
             val idx = (player?.currentMediaItemIndex ?: -1) + 1
             val item = buildMediaItemForTrack(track)
             queue.add(idx.coerceAtMost(queue.size), item)
@@ -763,11 +793,21 @@ scrobbleJob = coroutineScope?.launch(Dispatchers.IO) {
 
     // Append multiple tracks to the end of the queue
     fun addToQueue(tracks: List<com.example.moniq.model.Track>) {
-        for (t in tracks) addToQueue(t)
+        coroutineScope?.launch {
+            val enriched = MetadataFetcher.enrichTracksMetadata(tracks)
+            for (t in enriched) addToQueueInternal(t)
+        }
     }
 
     // Insert multiple tracks immediately after the current playing index
     fun playNext(tracks: List<com.example.moniq.model.Track>) {
+        coroutineScope?.launch {
+            val enriched = MetadataFetcher.enrichTracksMetadata(tracks)
+            playNextBatchInternal(enriched)
+        }
+    }
+    
+    private fun playNextBatchInternal(tracks: List<com.example.moniq.model.Track>) {
         try {
             initialize(appContext ?: return)
             var idx = (player?.currentMediaItemIndex ?: -1) + 1
@@ -830,18 +870,27 @@ scrobbleJob = coroutineScope?.launch(Dispatchers.IO) {
                     if (!tr.artist.isNullOrEmpty()) setArtist(tr.artist)
                     if (!tr.albumName.isNullOrBlank()) setAlbumTitle(tr.albumName)
                     val coverId = tr.coverArtId ?: tr.albumId ?: tr.id
-                    if (!coverId.isNullOrEmpty() && SessionManager.host != null) {
-                        val art =
-                            android.net.Uri.parse(SessionManager.host)
-                                .buildUpon()
-                                .appendPath("rest")
-                                .appendPath("getCoverArt.view")
-                                .appendQueryParameter("id", coverId)
-                                .appendQueryParameter("u", SessionManager.username ?: "")
-                                .appendQueryParameter("p", SessionManager.password ?: "")
-                                .build()
-                        setArtworkUri(art)
-                    }
+if (!coverId.isNullOrEmpty()) {
+    // Check if coverArtId is already an absolute URL
+    if (coverId.startsWith("http")) {
+        // Use the absolute URL directly
+        try {
+            setArtworkUri(android.net.Uri.parse(coverId))
+        } catch (_: Exception) {}
+    } else if (SessionManager.host != null) {
+        // Build URL from host + ID
+        val art =
+            android.net.Uri.parse(SessionManager.host)
+                .buildUpon()
+                .appendPath("rest")
+                .appendPath("getCoverArt.view")
+                .appendQueryParameter("id", coverId)
+                .appendQueryParameter("u", SessionManager.username ?: "")
+                .appendQueryParameter("p", SessionManager.password ?: "")
+                .build()
+        setArtworkUri(art)
+    }
+}
                     try {
                         val extras = android.os.Bundle()
                         tr.albumId?.let { extras.putString("albumId", it) }
@@ -919,7 +968,11 @@ scrobbleJob = coroutineScope?.launch(Dispatchers.IO) {
                 albumName = albumName,
                 coverArtId = albumArt
             )
-        setQueue(listOf(temp), 0)
+        // Enrich metadata before playing
+        coroutineScope?.launch {
+            val enriched = MetadataFetcher.enrichTrackMetadata(temp)
+            setQueueInternal(listOf(enriched), 0)
+        }
         // avoid adding an empty-cover duplicate here; setQueue already records the played track
         // with available metadata
     }

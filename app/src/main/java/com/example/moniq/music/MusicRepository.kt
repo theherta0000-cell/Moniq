@@ -45,15 +45,20 @@ class MusicRepository {
                                 else root
                         // album may be present
                         val albumObj =
-                                when {
-                                    sr.has("album") -> sr.get("album")
-                                    else -> sr.optJSONObject("album") ?: sr
-                                }
-                        val albumCover =
-                                if (albumObj is JSONObject)
-                                        albumObj.optString("coverArt", null)
-                                                ?: albumObj.optString("coverArtId", null)
-                                else null
+        when {
+            sr.has("album") -> sr.get("album")
+            else -> sr.optJSONObject("album") ?: sr
+        }
+val albumCover =
+        if (albumObj is JSONObject)
+                albumObj.optString("coverArt", null)
+                        ?: albumObj.optString("coverArtId", null)
+        else null
+val albumName =
+        if (albumObj is JSONObject)
+                albumObj.optString("name", null) 
+                        ?: albumObj.optString("title", null)
+        else null
                         val trackArr =
                                 when (albumObj) {
                                     is JSONObject -> {
@@ -79,15 +84,16 @@ class MusicRepository {
                                 val albumId =
                                         it.optString("albumId", null) ?: it.optString("album", null)
                                 tracks.add(
-                                        Track(
-                                                id,
-                                                title,
-                                                artist,
-                                                duration,
-                                                albumId = albumId,
-                                                coverArtId = trackCover
-                                        )
-                                )
+        Track(
+                id,
+                title,
+                artist,
+                duration,
+                albumId = albumId,
+                albumName = albumName,
+                coverArtId = trackCover
+        )
+)
                             }
                         } else if (trackArr is JSONObject) {
                             val it = trackArr
@@ -101,15 +107,16 @@ class MusicRepository {
                             val albumId =
                                     it.optString("albumId", null) ?: it.optString("album", null)
                             tracks.add(
-                                    Track(
-                                            id,
-                                            title,
-                                            artist,
-                                            duration,
-                                            albumId = albumId,
-                                            coverArtId = trackCover
-                                    )
-                            )
+        Track(
+                id,
+                title,
+                artist,
+                duration,
+                albumId = albumId,
+                albumName = albumName,
+                coverArtId = trackCover
+        )
+)
                         }
                     } else {
                         // XML fallback
@@ -141,16 +148,19 @@ class MusicRepository {
                                 val trackAlbumId =
                                         parser.getAttributeValue(null, "albumId")
                                                 ?: parser.getAttributeValue(null, "album")
-                                tracks.add(
-                                        Track(
-                                                id,
-                                                title,
-                                                artist,
-                                                duration,
-                                                albumId = trackAlbumId,
-                                                coverArtId = trackCoverXml
-                                        )
-                                )
+                                val albumNameXml = parser.getAttributeValue(null, "album")
+        ?: parser.getAttributeValue(null, "albumName")
+tracks.add(
+        Track(
+                id,
+                title,
+                artist,
+                duration,
+                albumId = trackAlbumId,
+                albumName = albumNameXml,
+                coverArtId = trackCoverXml
+        )
+)
                             }
                             event = parser.next()
                         }

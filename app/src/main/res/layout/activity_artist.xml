@@ -58,7 +58,7 @@
                     android:id="@+id/artistListeners"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="1973 256 listeners in this month"
+                    android:text="Artist"
                     android:textSize="12sp"
                     android:textColor="#DDDDDD"
                     android:layout_marginTop="4dp" />
@@ -119,11 +119,49 @@
 
             </com.google.android.material.card.MaterialCardView>
 
+            <!-- Song Search Bar -->
+<com.google.android.material.textfield.TextInputLayout
+    android:id="@+id/artistSongSearchLayout"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:hint="Search songs"
+    android:layout_marginStart="16dp"
+    android:layout_marginEnd="16dp"
+    android:layout_marginBottom="8dp"
+    app:boxStrokeWidth="2dp"
+    app:boxCornerRadiusTopStart="12dp"
+    app:boxCornerRadiusTopEnd="12dp"
+    app:boxCornerRadiusBottomStart="12dp"
+    app:boxCornerRadiusBottomEnd="12dp"
+    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense">
+
+    <com.google.android.material.textfield.TextInputEditText
+        android:id="@+id/artistSongSearch"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:inputType="text"
+        android:textColor="@android:color/white"
+        android:imeOptions="actionSearch"
+        android:drawableStart="@drawable/ic_search"
+        android:drawablePadding="8dp" />
+
+</com.google.android.material.textfield.TextInputLayout>
+
+            <!-- Loading indicator for search -->
+<ProgressBar
+    android:id="@+id/searchLoadingIndicator"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_gravity="center"
+    android:layout_marginTop="8dp"
+    android:layout_marginBottom="8dp"
+    android:visibility="gone" />
+            
             <!-- Random songs header -->
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Random songs"
+                android:text="Songs"
                 android:textSize="18sp"
                 android:textStyle="bold"
                 android:textColor="?android:attr/textColorPrimary"
@@ -156,13 +194,13 @@
 
             <!-- Albums list (horizontal) -->
             <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/albumsRecycler"
-                android:layout_width="match_parent"
-                android:layout_height="120dp"
-                android:nestedScrollingEnabled="false"
-                android:overScrollMode="never"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp" />
+    android:id="@+id/albumsRecycler"
+    android:layout_width="match_parent"
+    android:layout_height="200dp"
+    android:nestedScrollingEnabled="false"
+    android:overScrollMode="never"
+    android:paddingStart="8dp"
+    android:paddingEnd="8dp" />
 
         </LinearLayout>
 

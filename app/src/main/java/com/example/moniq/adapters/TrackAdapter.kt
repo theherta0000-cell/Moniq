@@ -87,16 +87,64 @@ class TrackAdapter(
                         onRemoveFromPlaylist(t)
                         true
                     }
-                    "Play next" -> {
-                        com.example.moniq.player.AudioPlayer.initialize(ctx)
-                        com.example.moniq.player.AudioPlayer.playNext(t)
-                        true
-                    }
-                    "Add to queue" -> {
-                        com.example.moniq.player.AudioPlayer.initialize(ctx)
-                        com.example.moniq.player.AudioPlayer.addToQueue(t)
-                        true
-                    }
+                    // Replace the "Play next" and "Add to queue" menu item handlers in TrackAdapter.kt with this:
+
+"Play next" -> {
+    com.example.moniq.player.AudioPlayer.initialize(ctx)
+    // Build proper cover URL with correct password handling
+    val enrichedTrack = t.copy(
+        coverArtId = if (!t.coverArtId.isNullOrBlank() && t.coverArtId.startsWith("http")) {
+            t.coverArtId
+        } else {
+            val coverId = t.coverArtId ?: t.albumId ?: t.id
+            val host = com.example.moniq.SessionManager.host
+            if (host != null) {
+                // FIXED: Use proper password handling like AudioPlayer does
+                val passwordRaw = com.example.moniq.SessionManager.password ?: ""
+                val legacy = com.example.moniq.SessionManager.legacy
+                val pwParam = if (legacy) passwordRaw else com.example.moniq.util.Crypto.md5(passwordRaw)
+                
+                android.net.Uri.parse(host).buildUpon()
+                    .appendPath("rest")
+                    .appendPath("getCoverArt.view")
+                    .appendQueryParameter("id", coverId)
+                    .appendQueryParameter("u", com.example.moniq.SessionManager.username ?: "")
+                    .appendQueryParameter("p", pwParam)  // Use the properly formatted password
+                    .build().toString()
+            } else t.coverArtId
+        }
+    )
+    com.example.moniq.player.AudioPlayer.playNext(enrichedTrack)
+    true
+}
+"Add to queue" -> {
+    com.example.moniq.player.AudioPlayer.initialize(ctx)
+    // Build proper cover URL with correct password handling
+    val enrichedTrack = t.copy(
+        coverArtId = if (!t.coverArtId.isNullOrBlank() && t.coverArtId.startsWith("http")) {
+            t.coverArtId
+        } else {
+            val coverId = t.coverArtId ?: t.albumId ?: t.id
+            val host = com.example.moniq.SessionManager.host
+            if (host != null) {
+                // FIXED: Use proper password handling like AudioPlayer does
+                val passwordRaw = com.example.moniq.SessionManager.password ?: ""
+                val legacy = com.example.moniq.SessionManager.legacy
+                val pwParam = if (legacy) passwordRaw else com.example.moniq.util.Crypto.md5(passwordRaw)
+                
+                android.net.Uri.parse(host).buildUpon()
+                    .appendPath("rest")
+                    .appendPath("getCoverArt.view")
+                    .appendQueryParameter("id", coverId)
+                    .appendQueryParameter("u", com.example.moniq.SessionManager.username ?: "")
+                    .appendQueryParameter("p", pwParam)  // Use the properly formatted password
+                    .build().toString()
+            } else t.coverArtId
+        }
+    )
+    com.example.moniq.player.AudioPlayer.addToQueue(enrichedTrack)
+    true
+}
                     else -> {
                         // If user tapped artist or album name string, try to navigate
                         val title = mi.title.toString()
@@ -242,9 +290,10 @@ class TrackAdapter(
             val url = candidates[index]
             android.util.Log.d("TrackAdapter", "Trying cover URL [$index/${candidates.size}]: $url")
             holder.cover.load(url) {
-                placeholder(R.drawable.ic_album)
-                crossfade(true)
-                listener(
+    placeholder(R.drawable.ic_album)
+    crossfade(true)
+    transformations(coil.transform.RoundedCornersTransformation(8f * holder.itemView.resources.displayMetrics.density))
+    listener(
                         onSuccess = { _, _ ->
                             android.util.Log.d("TrackAdapter", "Cover load succeeded: $url")
                             // Persist resolved absolute cover URL for this track so Recently Played

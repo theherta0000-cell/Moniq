@@ -39,53 +39,6 @@
     android:text="Note: pitch will change automatically with speed."
     android:textColor="?android:attr/textColorSecondary" />
         
-        <!-- Lyrics Display Settings -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="Lyrics Display"
-            android:textStyle="bold"
-            android:textSize="16sp"
-            android:textColor="?android:attr/textColorPrimary" />
-        
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="12dp"
-            android:gravity="center_vertical">
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Show Romanization"
-                android:textColor="?android:attr/textColorPrimary" />
-            <androidx.appcompat.widget.SwitchCompat
-                android:id="@+id/settings_show_romanization_switch"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:checked="true" />
-        </LinearLayout>
-        
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="8dp"
-            android:gravity="center_vertical">
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Show Translation"
-                android:textColor="?android:attr/textColorPrimary" />
-            <androidx.appcompat.widget.SwitchCompat
-                android:id="@+id/settings_show_translation_switch"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:checked="true" />
-        </LinearLayout>
         
         <TextView
     android:id="@+id/settings_download_label"

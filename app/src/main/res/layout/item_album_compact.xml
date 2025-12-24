@@ -23,14 +23,17 @@
     </androidx.cardview.widget.CardView>
 
     <TextView
-        android:id="@+id/albumName"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="12sp"
-        android:maxLines="2"
-        android:ellipsize="end"
-        android:textColor="?android:attr/textColorPrimary"
-        android:layout_marginTop="6dp" />
+    android:id="@+id/albumName"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:textSize="13sp"
+    android:maxLines="2"
+    android:ellipsize="end"
+    android:textColor="#FFFFFF"
+    android:textStyle="bold"
+    android:layout_marginTop="6dp"
+    android:layout_marginStart="4dp"
+    android:layout_marginEnd="4dp" />
 
     <TextView
         android:id="@+id/albumArtist"

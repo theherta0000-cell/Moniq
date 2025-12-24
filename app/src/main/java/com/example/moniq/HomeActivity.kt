@@ -274,13 +274,25 @@ class HomeActivity : ComponentActivity() {
         // Load AlbumList2 below Recently Played
         val albumList2Recycler = findViewById<androidx.recyclerview.widget.RecyclerView?>(R.id.albumList2Recycler)
         val albumList2Title = findViewById<android.widget.TextView?>(R.id.albumList2Title)
-        val albumAdapter = com.example.moniq.adapters.AlbumAdapter(emptyList(), { album ->
-            val intent = Intent(this, AlbumActivity::class.java)
-            intent.putExtra("albumId", album.id)
-            intent.putExtra("albumTitle", album.name)
-            intent.putExtra("albumArtist", album.artist)
-            startActivity(intent)
-        }, compact = true)
+       val albumAdapter = com.example.moniq.adapters.AlbumAdapter(
+            emptyList(), 
+            onClick = { album ->
+                val intent = Intent(this, AlbumActivity::class.java)
+                intent.putExtra("albumId", album.id)
+                intent.putExtra("albumTitle", album.name)
+                intent.putExtra("albumArtist", album.artist)
+                startActivity(intent)
+            },
+            compact = true,
+            onLongClick = { album ->
+                if (!album.artist.isNullOrBlank()) {
+                    val intent = Intent(this, SearchActivity::class.java)
+                    intent.putExtra("query", album.artist)
+                    intent.putExtra("filter", "ARTISTS")
+                    startActivity(intent)
+                }
+            }
+        )
         albumList2Recycler?.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this, androidx.recyclerview.widget.LinearLayoutManager.HORIZONTAL, false)
         albumList2Recycler?.adapter = albumAdapter
         lifecycleScope.launch {

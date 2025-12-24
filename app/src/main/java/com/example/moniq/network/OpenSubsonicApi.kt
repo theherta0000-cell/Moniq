@@ -64,6 +64,15 @@ interface OpenSubsonicApi {
         @Query("c") clientName: String = "Moniq"
     ): Response<String>
 
+    @GET("rest/getSong.view")
+    suspend fun getSong(
+        @Query("u") username: String,
+        @Query("p") password: String,
+        @Query("id") id: String,
+        @Query("v") version: String = "1.16.1",
+        @Query("c") clientName: String = "Moniq"
+    ): Response<String>
+
     @GET("rest/stream.view")
     suspend fun stream(
         @Query("u") username: String,

@@ -19,3 +19,6 @@ keystore.properties
 /captures
 .externalNativeBuild
 .cxx
+
+# Ignore LastFmManager (contains secrets / local logic)
+app/src/main/java/com/example/moniq/lastfm/LastFmManager.kt

@@ -13,11 +13,11 @@ import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 
 data class SearchResults(
-    val songs: List<Track>,
-    val albums: List<Album>,
-    val artists: List<Artist>,
-    val code: Int = 0,
-    val rawBody: String = ""
+        val songs: List<Track>,
+        val albums: List<Album>,
+        val artists: List<Artist>,
+        val code: Int = 0,
+        val rawBody: String = ""
 )
 
 class SearchRepository {
@@ -29,17 +29,17 @@ class SearchRepository {
         val api: OpenSubsonicApi = RetrofitClient.create(host).create(OpenSubsonicApi::class.java)
         val resp = api.search3(username, password, query)
         val code =
-            try {
-                resp.code()
-            } catch (_: Exception) {
-                -1
-            }
+                try {
+                    resp.code()
+                } catch (_: Exception) {
+                    -1
+                }
         val body =
-            try {
-                resp.body() ?: resp.errorBody()?.string() ?: ""
-            } catch (_: Exception) {
-                ""
-            }
+                try {
+                    resp.body() ?: resp.errorBody()?.string() ?: ""
+                } catch (_: Exception) {
+                    ""
+                }
 
         // Debug logging: print response code and body to help diagnose search issues
         try {
@@ -59,17 +59,17 @@ class SearchRepository {
                 val root = JSONObject(body)
                 // many servers wrap in "subsonic-response"
                 val sr =
-                    if (root.has("subsonic-response")) root.getJSONObject("subsonic-response")
-                    else root
+                        if (root.has("subsonic-response")) root.getJSONObject("subsonic-response")
+                        else root
                 val search =
-                    if (sr.has("searchResult3")) sr.get("searchResult3")
-                    else sr.opt("searchResult3")
+                        if (sr.has("searchResult3")) sr.get("searchResult3")
+                        else sr.opt("searchResult3")
                 // searchResult3 may be an object with arrays
                 val searchObj =
-                    when (search) {
-                        is JSONObject -> search as JSONObject
-                        else -> sr.optJSONObject("searchResult3") ?: sr
-                    }
+                        when (search) {
+                            is JSONObject -> search as JSONObject
+                            else -> sr.optJSONObject("searchResult3") ?: sr
+                        }
 
                 // artists
                 if (searchObj.has("artist")) {
@@ -80,7 +80,8 @@ class SearchRepository {
                             val id = it.optString("id", "")
                             val name = it.optString("name", "")
                             val cover =
-                                it.optString("coverArt", null) ?: it.optString("coverArtId", null)
+                                    it.optString("coverArt", null)
+                                            ?: it.optString("coverArtId", null)
                             artists.add(Artist(id, name, cover))
                         }
                     } else if (a is JSONObject) {
@@ -92,28 +93,53 @@ class SearchRepository {
                 }
 
                 // albums
-                if (searchObj.has("album")) {
-                    val a = searchObj.get("album")
-                    if (a is JSONArray) {
-                        for (i in 0 until a.length()) {
-                            val it = a.optJSONObject(i) ?: continue
-                            val id = it.optString("id", "")
-                            val name = it.optString("title", it.optString("name", ""))
-                            val artist = it.optString("artist", "")
-                            val year = it.optInt("year", -1).let { if (it <= 0) null else it }
-                            val cover =
-                                it.optString("coverArt", null) ?: it.optString("coverArtId", null)
-                            albums.add(Album(id, name, artist, year, cover))
-                        }
-                    } else if (a is JSONObject) {
-                        val id = a.optString("id", "")
-                        val name = a.optString("title", a.optString("name", ""))
-                        val artist = a.optString("artist", "")
-                        val year = a.optInt("year", -1).let { if (it <= 0) null else it }
-                        val cover = a.optString("coverArt", null) ?: a.optString("coverArtId", null)
-                        albums.add(Album(id, name, artist, year, cover))
-                    }
-                }
+if (searchObj.has("album")) {
+    val a = searchObj.get("album")
+    Log.d("SearchRepository", "Found 'album' key, type=${a.javaClass.simpleName}")
+    if (a is JSONArray) {
+        Log.d("SearchRepository", "Album is JSONArray, length=${a.length()}")
+        for (i in 0 until a.length()) {
+            val it = a.optJSONObject(i) ?: continue
+            val id = it.optString("id", "")
+            
+            // Fix: properly handle null/empty title and name fields
+            val titleRaw = if (it.has("title")) it.optString("title", null) else null
+            val nameRaw = if (it.has("name")) it.optString("name", null) else null
+            val name = when {
+                !titleRaw.isNullOrBlank() -> titleRaw
+                !nameRaw.isNullOrBlank() -> nameRaw
+                else -> "Unknown Album"
+            }
+            
+            val artist = it.optString("artist", "")
+            val year = it.optInt("year", -1).let { if (it <= 0) null else it }
+            val cover =
+                    it.optString("coverArt", null)
+                            ?: it.optString("coverArtId", null)
+            Log.d("SearchRepository", "Album[$i]: id=$id, name=$name, artist=$artist, year=$year, cover=$cover, rawTitle=$titleRaw, rawName=$nameRaw")
+            albums.add(Album(id, name, artist, year, cover))
+        }
+    } else if (a is JSONObject) {
+        val id = a.optString("id", "")
+        
+        // Fix: properly handle null/empty title and name fields
+        val titleRaw = if (a.has("title")) a.optString("title", null) else null
+        val nameRaw = if (a.has("name")) a.optString("name", null) else null
+        val name = when {
+            !titleRaw.isNullOrBlank() -> titleRaw
+            !nameRaw.isNullOrBlank() -> nameRaw
+            else -> "Unknown Album"
+        }
+        
+        val artist = a.optString("artist", "")
+        val year = a.optInt("year", -1).let { if (it <= 0) null else it }
+        val cover = a.optString("coverArt", null) ?: a.optString("coverArtId", null)
+        Log.d("SearchRepository", "Album (single): id=$id, name=$name, artist=$artist, year=$year, cover=$cover, rawTitle=$titleRaw, rawName=$nameRaw")
+        albums.add(Album(id, name, artist, year, cover))
+    }
+} else {
+    Log.d("SearchRepository", "No 'album' key found in searchObj. Available keys: ${searchObj.keys().asSequence().toList()}")
+}
 
                 // songs / tracks
                 if (searchObj.has("song") || searchObj.has("track")) {
@@ -127,41 +153,45 @@ class SearchRepository {
                             val artist = it.optString("artist", "")
                             val duration = it.optInt("duration", it.optInt("seconds", 0))
                             val albumIdStr = it.optString("albumId", null)
-                            val albumNameStr = it.optString("album", null) ?: it.optString("albumName", null)
+                            val albumNameStr =
+                                    it.optString("album", null) ?: it.optString("albumName", null)
                             val albumId = albumIdStr ?: null
                             val cover =
-                                it.optString("coverArt", null) ?: it.optString("coverArtId", null)
+                                    it.optString("coverArt", null)
+                                            ?: it.optString("coverArtId", null)
                             songs.add(
-                                Track(
-                                    id,
-                                    title,
-                                    artist,
-                                    duration,
-                                    albumId = albumId,
-                                    albumName = albumNameStr,
-                                    coverArtId = cover
-                                )
+                                    Track(
+                                            id,
+                                            title,
+                                            artist,
+                                            duration,
+                                            albumId = albumId,
+                                            albumName = albumNameStr,
+                                            coverArtId = cover
+                                    )
                             )
                         }
                     } else if (a is JSONObject) {
-    val id = a.optString("id", "")
-    val title = a.optString("title", a.optString("name", ""))
-    val artist = a.optString("artist", "")
-    val duration = a.optInt("duration", a.optInt("seconds", 0))
-    val albumIdStr = a.optString("albumId", null)
-    val albumNameStr = a.optString("album", null) ?: a.optString("albumName", null)  // ← FIXED
-    val albumId = albumIdStr ?: null
-    val cover = a.optString("coverArt", null) ?: a.optString("coverArtId", null)
+                        val id = a.optString("id", "")
+                        val title = a.optString("title", a.optString("name", ""))
+                        val artist = a.optString("artist", "")
+                        val duration = a.optInt("duration", a.optInt("seconds", 0))
+                        val albumIdStr = a.optString("albumId", null)
+                        val albumNameStr =
+                                a.optString("album", null)
+                                        ?: a.optString("albumName", null) // ← FIXED
+                        val albumId = albumIdStr ?: null
+                        val cover = a.optString("coverArt", null) ?: a.optString("coverArtId", null)
                         songs.add(
-                            Track(
-                                id,
-                                title,
-                                artist,
-                                duration,
-                                albumId = albumId,
-                                albumName = albumNameStr,
-                                coverArtId = cover
-                            )
+                                Track(
+                                        id,
+                                        title,
+                                        artist,
+                                        duration,
+                                        albumId = albumId,
+                                        albumName = albumNameStr,
+                                        coverArtId = cover
+                                )
                         )
                     }
                 }
@@ -179,8 +209,8 @@ class SearchRepository {
                                 val id = parser.getAttributeValue(null, "id") ?: ""
                                 val name = parser.getAttributeValue(null, "name") ?: ""
                                 val cover =
-                                    parser.getAttributeValue(null, "coverArt")
-                                        ?: parser.getAttributeValue(null, "coverArtId")
+                                        parser.getAttributeValue(null, "coverArt")
+                                                ?: parser.getAttributeValue(null, "coverArtId")
                                 artists.add(Artist(id, name, cover))
                             }
                             "album" -> {
@@ -192,12 +222,11 @@ class SearchRepository {
                                 val yearStr = parser.getAttributeValue(null, "year")
                                 val year = yearStr?.toIntOrNull()
                                 val cover =
-                                    parser.getAttributeValue(null, "coverArt")
-                                        ?: parser.getAttributeValue(null, "coverArtId")
+                                        parser.getAttributeValue(null, "coverArt")
+                                                ?: parser.getAttributeValue(null, "coverArtId")
                                 albums.add(Album(id, name, artist, year, cover))
                             }
-                            "song",
-                            "track" -> {
+                            "song", "track" -> {
                                 val id = parser.getAttributeValue(null, "id") ?: ""
                                 val title = parser.getAttributeValue(null, "title") ?: ""
                                 val artist = parser.getAttributeValue(null, "artist") ?: ""
@@ -205,23 +234,22 @@ class SearchRepository {
                                 val albumNameRaw = parser.getAttributeValue(null, "album")
                                 val albumId = albumIdRaw ?: null
                                 val cover =
-                                    parser.getAttributeValue(null, "coverArt")
-                                        ?: parser.getAttributeValue(null, "coverArtId")
+                                        parser.getAttributeValue(null, "coverArt")
+                                                ?: parser.getAttributeValue(null, "coverArtId")
                                 val durationStr =
-                                    parser.getAttributeValue(null, "duration")
-                                        ?: parser.getAttributeValue(null, "seconds")
-                                        ?: "0"
+                                        parser.getAttributeValue(null, "duration")
+                                                ?: parser.getAttributeValue(null, "seconds") ?: "0"
                                 val duration = durationStr.toIntOrNull() ?: 0
                                 songs.add(
-                                    Track(
-                                        id,
-                                        title,
-                                        artist,
-                                        duration,
-                                        albumId = albumId,
-                                        albumName = albumNameRaw,
-                                        coverArtId = cover
-                                    )
+                                        Track(
+                                                id,
+                                                title,
+                                                artist,
+                                                duration,
+                                                albumId = albumId,
+                                                albumName = albumNameRaw,
+                                                coverArtId = cover
+                                        )
                                 )
                             }
                         }
@@ -255,30 +283,36 @@ class SearchRepository {
             }
 
             val filteredAlbums =
-                albums.filter { alb ->
-                    val nameLower = alb.name.lowercase().trim()
-                    val hasArtistField = !alb.artist.isNullOrBlank()
-                    val idLooksLikeArtist = alb.id.isNotBlank() && artistIds.contains(alb.id)
-                    val nameLooksLikeArtist = looksLikeArtistByName(nameLower)
+        albums.filter { alb ->
+            val nameLower = alb.name.lowercase().trim()
+            val hasArtistField = !alb.artist.isNullOrBlank()
+            val idLooksLikeArtist = alb.id.isNotBlank() && artistIds.contains(alb.id)
+            val nameLooksLikeArtist = looksLikeArtistByName(nameLower)
 
-                    // Keep album if it has an artist, or it doesn't look like an artist entry
-                    hasArtistField || (!idLooksLikeArtist && !nameLooksLikeArtist)
-                }
+            // Keep album if it has an artist, or it doesn't look like an artist entry
+            val keep = hasArtistField || (!idLooksLikeArtist && !nameLooksLikeArtist)
+            if (!keep) {
+                Log.d("SearchRepository", "FILTERED OUT album: id=${alb.id}, name=${alb.name}, hasArtist=$hasArtistField, idLooksLikeArtist=$idLooksLikeArtist, nameLooksLikeArtist=$nameLooksLikeArtist")
+            }
+            keep
+        }
+
+Log.d("SearchRepository", "Albums before filter: ${albums.size}, after filter: ${filteredAlbums.size}")
 
             return SearchResults(
-                songs = songs,
-                albums = filteredAlbums,
-                artists = artists,
-                code = code,
-                rawBody = body
+                    songs = songs,
+                    albums = filteredAlbums,
+                    artists = artists,
+                    code = code,
+                    rawBody = body
             )
         } catch (t: Throwable) {
             return SearchResults(
-                songs = songs,
-                albums = albums,
-                artists = artists,
-                code = code,
-                rawBody = body
+                    songs = songs,
+                    albums = albums,
+                    artists = artists,
+                    code = code,
+                    rawBody = body
             )
         }
     }

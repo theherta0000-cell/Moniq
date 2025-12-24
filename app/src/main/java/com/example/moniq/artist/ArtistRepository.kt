@@ -44,24 +44,42 @@ class ArtistRepository {
 
                 val a = if (albumContainer.has("album")) albumContainer.get("album") else albumContainer.opt("album")
                 if (a is JSONArray) {
-                    for (i in 0 until a.length()) {
-                        val it = a.optJSONObject(i) ?: continue
-                        val id = it.optString("id", "")
-                        val name = it.optString("title", it.optString("name", ""))
-                        val artist = it.optString("artist", "")
-                        val year = it.optInt("year", -1).let { if (it <= 0) null else it }
-                        val cover = it.optString("coverArt", null) ?: it.optString("coverArtId", null)
-                        albums.add(Album(id, name, artist, year, cover))
-                    }
-                } else if (a is JSONObject) {
-                    val it = a
-                    val id = it.optString("id", "")
-                    val name = it.optString("title", it.optString("name", ""))
-                    val artist = it.optString("artist", "")
-                    val year = it.optInt("year", -1).let { if (it <= 0) null else it }
-                    val cover = it.optString("coverArt", null) ?: it.optString("coverArtId", null)
-                    albums.add(Album(id, name, artist, year, cover))
-                }
+    for (i in 0 until a.length()) {
+        val it = a.optJSONObject(i) ?: continue
+        val id = it.optString("id", "")
+        
+        // Fix: properly handle null/empty title and name fields
+        val titleRaw = if (it.has("title")) it.optString("title", null) else null
+        val nameRaw = if (it.has("name")) it.optString("name", null) else null
+        val name = when {
+            !titleRaw.isNullOrBlank() -> titleRaw
+            !nameRaw.isNullOrBlank() -> nameRaw
+            else -> "Unknown Album"
+        }
+        
+        val artist = it.optString("artist", "")
+        val year = it.optInt("year", -1).let { if (it <= 0) null else it }
+        val cover = it.optString("coverArt", null) ?: it.optString("coverArtId", null)
+        albums.add(Album(id, name, artist, year, cover))
+    }
+} else if (a is JSONObject) {
+    val it = a
+    val id = it.optString("id", "")
+    
+    // Fix: properly handle null/empty title and name fields
+    val titleRaw = if (it.has("title")) it.optString("title", null) else null
+    val nameRaw = if (it.has("name")) it.optString("name", null) else null
+    val name = when {
+        !titleRaw.isNullOrBlank() -> titleRaw
+        !nameRaw.isNullOrBlank() -> nameRaw
+        else -> "Unknown Album"
+    }
+    
+    val artist = it.optString("artist", "")
+    val year = it.optInt("year", -1).let { if (it <= 0) null else it }
+    val cover = it.optString("coverArt", null) ?: it.optString("coverArtId", null)
+    albums.add(Album(id, name, artist, year, cover))
+}
             } else {
                 val factory = XmlPullParserFactory.newInstance()
                 val parser = factory.newPullParser()

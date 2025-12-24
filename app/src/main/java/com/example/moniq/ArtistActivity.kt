@@ -55,8 +55,86 @@ class ArtistActivity : ComponentActivity() {
         popularSongsRecycler?.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
         popularSongsRecycler?.adapter = trackAdapter
 
+        // Store all tracks for filtering
+        var allTracks = listOf<com.example.moniq.model.Track>()
+        var isSearchLoading = false
+
+// Wire up song search
+val songSearchInput = findViewById<com.google.android.material.textfield.TextInputEditText?>(R.id.artistSongSearch)
+val searchLoadingIndicator = findViewById<android.widget.ProgressBar?>(R.id.searchLoadingIndicator)
+
+songSearchInput?.addTextChangedListener(object : android.text.TextWatcher {
+    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+    override fun afterTextChanged(s: android.text.Editable?) {
+        val query = s?.toString()?.lowercase()?.trim() ?: ""
+        
+        if (query.isEmpty()) {
+            // Show the initial loaded tracks
+            trackAdapter.update(allTracks.take(20))
+        } else {
+            // Search through loaded tracks first (instant feedback)
+            val filtered = allTracks.filter { track ->
+                track.title.lowercase().contains(query) ||
+                track.artist?.lowercase()?.contains(query) == true ||
+                track.albumName?.lowercase()?.contains(query) == true
+            }
+            trackAdapter.update(filtered)
+            
+            // If we haven't loaded all tracks yet and search is active, load them
+            if (allTracks.size < 100 && !isSearchLoading) {
+                isSearchLoading = true
+                searchLoadingIndicator?.visibility = android.view.View.VISIBLE
+                
+                lifecycleScope.launch {
+                    try {
+                        val repo = ArtistRepository()
+                        val albums = repo.getArtistAlbums(artistId)
+                        val musicRepo = com.example.moniq.music.MusicRepository()
+                        
+                        val tempTracks = mutableListOf<com.example.moniq.model.Track>()
+                        for (alb in albums) {
+                            try {
+                                val t = musicRepo.getAlbumTracks(alb.id)
+                                val byArtist = t.filter { tr ->
+                                    try {
+                                        val an = artistName.lowercase().trim()
+                                        val ta = (tr.artist ?: "").lowercase().trim()
+                                        ta.contains(an) || an.contains(ta)
+                                    } catch (_: Exception) { false }
+                                }
+                                if (byArtist.isNotEmpty()) tempTracks.addAll(byArtist) else tempTracks.addAll(t)
+                            } catch (_: Throwable) {}
+                        }
+                        
+                        allTracks = tempTracks.distinctBy { it.id }
+                        
+                        // Re-apply the current search query
+                        val currentQuery = songSearchInput?.text?.toString()?.lowercase()?.trim() ?: ""
+                        if (currentQuery.isNotEmpty()) {
+                            val newFiltered = allTracks.filter { track ->
+                                track.title.lowercase().contains(currentQuery) ||
+                                track.artist?.lowercase()?.contains(currentQuery) == true ||
+                                track.albumName?.lowercase()?.contains(currentQuery) == true
+                            }
+                            trackAdapter.update(newFiltered)
+                        }
+                        
+                        searchLoadingIndicator?.visibility = android.view.View.GONE
+                        isSearchLoading = false
+                    } catch (t: Throwable) {
+                        android.util.Log.w("ArtistActivity", "Failed to load all tracks for search", t)
+                        searchLoadingIndicator?.visibility = android.view.View.GONE
+                        isSearchLoading = false
+                    }
+                }
+            }
+        }
+    }
+})
+
         // populate random sample tracks
-        val sampleTitles = listOf("Thinkin Bout You","Provider","Pink + White","Nikes","Ivy","Seigfried")
+        val sampleTitles = listOf("Song 1","Song 2","Song 3","Song 4","Song 5","Song 6")
         val rand = java.util.Random()
         val randomTracks = (0 until 6).map { i ->
             val title = sampleTitles[rand.nextInt(sampleTitles.size)]
@@ -164,31 +242,30 @@ var latestResponse: String? = null
                 val albums: List<Album> = repo.getArtistAlbums(artistId)
                 albumAdapter.update(albums)
 
-                // Pick random albums and fetch tracks from them to show as "Popular songs"
+               // Pick random albums and fetch tracks from them to show as "Popular songs"
+try {
+    val musicRepo = com.example.moniq.music.MusicRepository()
+    val candidates = albums.shuffled().take(8)
+    val tempTracks = mutableListOf<com.example.moniq.model.Track>()
+    for (alb in candidates) {
+        try {
+            val t = musicRepo.getAlbumTracks(alb.id)
+            val byArtist = t.filter { tr ->
                 try {
-                    val musicRepo = com.example.moniq.music.MusicRepository()
-                    val candidates = albums.shuffled().take(8)
-                    val allTracks = mutableListOf<com.example.moniq.model.Track>()
-                    for (alb in candidates) {
-                        try {
-                            val t = musicRepo.getAlbumTracks(alb.id)
-                            // prefer tracks whose artist matches this artist name
-                            val byArtist = t.filter { tr ->
-                                try {
-                                    val an = artistName.lowercase().trim()
-                                    val ta = (tr.artist ?: "").lowercase().trim()
-                                    ta.contains(an) || an.contains(ta)
-                                } catch (_: Exception) { false }
-                            }
-                            if (byArtist.isNotEmpty()) allTracks.addAll(byArtist) else allTracks.addAll(t)
-                        } catch (_: Throwable) {}
-                    }
-                    val unique = allTracks.distinctBy { it.id }
-                    val picks = unique.shuffled().take(6)
-                    trackAdapter.update(picks)
-                } catch (_: Throwable) {
-                    // network failures are non-fatal; leave the randomized list empty
-                }
+                    val an = artistName.lowercase().trim()
+                    val ta = (tr.artist ?: "").lowercase().trim()
+                    ta.contains(an) || an.contains(ta)
+                } catch (_: Exception) { false }
+            }
+            if (byArtist.isNotEmpty()) tempTracks.addAll(byArtist) else tempTracks.addAll(t)
+        } catch (_: Throwable) {}
+    }
+    allTracks = tempTracks.distinctBy { it.id }.shuffled()
+    val picks = allTracks.take(20)
+    trackAdapter.update(picks)
+} catch (_: Throwable) {
+    // network failures are non-fatal; leave the randomized list empty
+}
             } catch (t: Throwable) {
                 android.util.Log.w("ArtistActivity", "Failed to load artist details", t)
                 bioView.text = "Failed to load biography"
@@ -230,13 +307,20 @@ var latestResponse: String? = null
     }
 
     private fun applyArtistPalette(bmp: android.graphics.Bitmap) {
-        try {
-            val defaultColor = resources.getColor(com.example.moniq.R.color.purple_500, theme)
-            val dominant = Palette.from(bmp).generate().getDominantColor(defaultColor)
-            val collapsing = findViewById<com.google.android.material.appbar.CollapsingToolbarLayout>(R.id.collapsingToolbar)
-            collapsing?.setContentScrimColor(dominant)
-            val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar)
-            toolbar?.setBackgroundColor(dominant)
-        } catch (_: Exception) {}
-    }
+    try {
+        val defaultColor = resources.getColor(com.example.moniq.R.color.purple_500, theme)
+        val dominant = Palette.from(bmp).generate().getDominantColor(defaultColor)
+        val collapsing = findViewById<com.google.android.material.appbar.CollapsingToolbarLayout>(R.id.collapsingToolbar)
+        collapsing?.setContentScrimColor(dominant)
+        val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar)
+        toolbar?.setBackgroundColor(dominant)
+        
+        // Apply to search bar
+        val searchLayout = findViewById<com.google.android.material.textfield.TextInputLayout?>(R.id.artistSongSearchLayout)
+        searchLayout?.boxStrokeColor = dominant
+        searchLayout?.hintTextColor = android.content.res.ColorStateList.valueOf(android.graphics.Color.WHITE)
+        val searchInput = findViewById<com.google.android.material.textfield.TextInputEditText?>(R.id.artistSongSearch)
+        searchInput?.setTextColor(android.graphics.Color.WHITE)
+    } catch (_: Exception) {}
+}
 }
