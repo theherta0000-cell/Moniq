@@ -10,6 +10,12 @@ import coil.load
 import androidx.recyclerview.widget.RecyclerView
 import com.example.moniq.R
 import com.example.moniq.model.Playlist
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import android.util.Log
+import com.example.moniq.util.ServerManager
 
 class PlaylistAdapter(
     var items: List<Playlist>,
@@ -34,58 +40,17 @@ class PlaylistAdapter(
         val p = items[position]
         holder.name.text = p.name
         holder.count.text = "${p.tracks.size}"
-        // prefer playlist custom cover, else try to load cover from first track in playlist
+        
         val candidates = mutableListOf<String>()
         if (!p.coverArtId.isNullOrBlank()) {
-            candidates.add(p.coverArtId!!)
+            val artUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(p.coverArtId)
+            if (!artUrl.isNullOrEmpty()) candidates.add(artUrl)
         }
-        // try to load cover from first track
-        val host = com.example.moniq.SessionManager.host
+        
         val first = p.tracks.firstOrNull()
-        if (first != null) {
-            if (!first.coverArtId.isNullOrBlank()) {
-                val c = first.coverArtId
-                if (c.startsWith("http")) candidates.add(c)
-            }
-            if (!first.coverArtId.isNullOrBlank() && host != null && !first.coverArtId.startsWith("http")) {
-                candidates.add(
-                        android.net.Uri.parse(host)
-                                .buildUpon()
-                                .appendPath("rest")
-                                .appendPath("getCoverArt.view")
-                                .appendQueryParameter("id", first.coverArtId)
-                                .appendQueryParameter("u", com.example.moniq.SessionManager.username ?: "")
-                                .appendQueryParameter("p", com.example.moniq.SessionManager.password ?: "")
-                                .build()
-                                .toString()
-                )
-            }
-            if (!first.albumId.isNullOrBlank() && host != null) {
-                candidates.add(
-                        android.net.Uri.parse(host)
-                                .buildUpon()
-                                .appendPath("rest")
-                                .appendPath("getCoverArt.view")
-                                .appendQueryParameter("id", first.albumId)
-                                .appendQueryParameter("u", com.example.moniq.SessionManager.username ?: "")
-                                .appendQueryParameter("p", com.example.moniq.SessionManager.password ?: "")
-                                .build()
-                                .toString()
-                )
-            }
-            if (!first.id.isNullOrBlank() && host != null) {
-                candidates.add(
-                        android.net.Uri.parse(host)
-                                .buildUpon()
-                                .appendPath("rest")
-                                .appendPath("getCoverArt.view")
-                                .appendQueryParameter("id", first.id)
-                                .appendQueryParameter("u", com.example.moniq.SessionManager.username ?: "")
-                                .appendQueryParameter("p", com.example.moniq.SessionManager.password ?: "")
-                                .build()
-                                .toString()
-                )
-            }
+        if (first != null && !first.coverArtId.isNullOrBlank()) {
+            val artUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(first.coverArtId)
+            if (!artUrl.isNullOrEmpty()) candidates.add(artUrl)
         }
 
         fun tryLoad(index: Int) {
@@ -109,8 +74,50 @@ class PlaylistAdapter(
             popup.menu.add("Delete")
             popup.setOnMenuItemClickListener { mi ->
                 when (mi.title) {
-                    "Download" -> { onDownload(p); true }
-                    "Delete" -> { onDelete(p); true }
+                    "Download" -> {
+                        GlobalScope.launch(Dispatchers.IO) {
+                            try {
+                                for (track in p.tracks) {
+                                    val streamUrl = findWorkingStreamUrl(track.id)
+                                    if (streamUrl == null) {
+                                        Log.w("PlaylistAdapter", "No server found for: ${track.title}")
+                                        continue
+                                    }
+                                    com.example.moniq.player.DownloadManager.downloadTrack(
+                                        context = holder.itemView.context,
+                                        trackId = track.id,
+                                        title = track.title,
+                                        artist = track.artist,
+                                        album = track.albumName,
+                                        albumArtUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(
+                                            track.coverArtId ?: track.albumId ?: track.id
+                                        ),
+                                        streamUrl = streamUrl
+                                    )
+                                }
+                                withContext(Dispatchers.Main) {
+                                    android.widget.Toast.makeText(
+                                        holder.itemView.context,
+                                        "Playlist download started",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            } catch (e: Exception) {
+                                withContext(Dispatchers.Main) {
+                                    android.widget.Toast.makeText(
+                                        holder.itemView.context,
+                                        "Download failed: ${e.message}",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        }
+                        true
+                    }
+                    "Delete" -> {
+                        onDelete(p)
+                        true
+                    }
                     else -> false
                 }
             }
@@ -123,5 +130,30 @@ class PlaylistAdapter(
     fun update(list: List<Playlist>) {
         items = list
         notifyDataSetChanged()
+    }
+
+    private suspend fun findWorkingStreamUrl(trackId: String): String? = withContext(Dispatchers.IO) {
+    val servers = ServerManager.getOrderedServers()
+        
+        for (server in servers) {
+            try {
+                val testUrl = "$server/track/?id=$trackId"
+                val conn = java.net.URL(testUrl).openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 3000
+                conn.readTimeout = 3000
+                conn.requestMethod = "GET"
+                
+                if (conn.responseCode == 200) {
+                    conn.disconnect()
+                    ServerManager.recordSuccess(server)
+                    return@withContext "$server/stream/?id=$trackId"
+                }
+                ServerManager.recordFailure(server)
+                conn.disconnect()
+            } catch (e: Exception) {
+                continue
+            }
+        }
+        return@withContext null
     }
 }

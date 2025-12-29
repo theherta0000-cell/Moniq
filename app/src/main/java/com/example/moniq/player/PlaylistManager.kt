@@ -153,25 +153,42 @@ class PlaylistManager(private val ctx: Context) {
     }
 
     private fun trackToJson(t: Track): JSONObject {
-        val o = JSONObject()
-        o.put("id", t.id)
-        o.put("title", t.title)
-        o.put("artist", t.artist)
-        o.put("duration", t.durationSec)
-        o.put("albumId", t.albumId)
-        o.put("albumName", t.albumName)
-        o.put("coverArtId", t.coverArtId)
-        return o
-    }
+    val o = JSONObject()
+    o.put("id", t.id)
+    o.put("title", t.title)
+    o.put("artist", t.artist)
+    o.put("duration", t.duration)
+    o.put("albumId", t.albumId)
+    o.put("albumName", t.albumName)
+    o.put("coverArtId", t.coverArtId)
+    o.put("streamUrl", t.streamUrl)
+    o.put("audioQuality", t.audioQuality)
+    o.put("bitDepth", t.bitDepth ?: 0)
+    o.put("sampleRate", t.sampleRate ?: 0)
+    return o
+}
 
     private fun jsonToTrack(o: JSONObject): Track? {
-        val id = o.optString("id", null) ?: return null
-        val title = o.optString("title", "")
-        val artist = o.optString("artist", "")
-        val duration = o.optInt("duration", 0)
-        val albumId = o.optString("albumId", null)
-        val albumName = o.optString("albumName", null)
-        val cover = o.optString("coverArtId", null)
-        return Track(id, title, artist, duration, albumId = albumId, albumName = albumName, coverArtId = cover)
-    }
+    val id = o.optString("id", null) ?: return null
+    val title = o.optString("title", "")
+    val artist = o.optString("artist", "")
+    val duration = o.optInt("duration", 0)
+    val albumId = o.optString("albumId", null)
+    val albumName = o.optString("albumName", null)
+    val cover = o.optString("coverArtId", null)
+    val streamUrl = o.optString("streamUrl", null)
+    val audioQuality = o.optString("audioQuality", null)
+    val bitDepth = o.optInt("bitDepth", 0).takeIf { it > 0 }
+    val sampleRate = o.optInt("sampleRate", 0).takeIf { it > 0 }
+    return Track(
+        id, title, artist, duration, 
+        albumId = albumId, 
+        albumName = albumName, 
+        coverArtId = cover, 
+        streamUrl = streamUrl,
+        audioQuality = audioQuality,
+        bitDepth = bitDepth,
+        sampleRate = sampleRate
+    )
+}
 }

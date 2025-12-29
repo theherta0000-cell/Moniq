@@ -4,10 +4,11 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
+import android.util.Log
 
 class SearchViewModel : ViewModel() {
     private val repo = SearchRepository()
-
+    
     val loading = MutableLiveData(false)
     val error = MutableLiveData<String?>(null)
     val songs = MutableLiveData<List<com.example.moniq.model.Track>>(emptyList())
@@ -15,25 +16,31 @@ class SearchViewModel : ViewModel() {
     val artists = MutableLiveData<List<com.example.moniq.model.Artist>>(emptyList())
     val rawResponse = MutableLiveData<String?>(null)
     val responseCode = MutableLiveData<Int?>(null)
-
+    
     fun search(query: String) {
-        // Allow empty query per OpenSubsonic spec (servers should return all data)
-        val q = query
-        loading.value = true
-        error.value = null
-        rawResponse.value = null
-        responseCode.value = null
         viewModelScope.launch {
+            loading.postValue(true)
+            error.postValue(null) // Clear previous errors
+            
             try {
-                val res = repo.search(q)
-                songs.postValue(res.songs)
-                albums.postValue(res.albums)
-                artists.postValue(res.artists)
-                rawResponse.postValue(res.rawBody)
-                responseCode.postValue(res.code)
-            } catch (t: Throwable) {
-                error.postValue(t.message ?: "Search failed")
-                rawResponse.postValue(t.message)
+                val result = repo.search(query) // Changed from 'repository' to 'repo'
+                songs.postValue(result.songs)
+                albums.postValue(result.albums)
+                artists.postValue(result.artists)
+                responseCode.postValue(result.code)
+                
+                // Check if search actually failed
+                if (result.code == -1) {
+                    error.postValue(result.rawBody) // This contains "All search sites failed"
+                }
+            } catch (e: Exception) {
+                // Capture the full error message with details
+                val errorMsg = when (e) {
+                    is HttpException -> "HTTP ${e.code}: ${e.message}\nURL: ${e.url}"
+                    else -> e.message ?: "Unknown error occurred"
+                }
+                error.postValue(errorMsg)
+                Log.e("SearchViewModel", "Search error", e)
             } finally {
                 loading.postValue(false)
             }

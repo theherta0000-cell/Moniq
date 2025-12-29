@@ -160,26 +160,6 @@
 
                 </com.google.android.material.card.MaterialCardView>
 
-            <!-- AlbumList2 (getAlbumList2) Section -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:id="@+id/albumList2Title"
-                android:text="Album Picks"
-                android:textColor="#FFFFFFFF"
-                android:textSize="20sp"
-                android:textStyle="bold"
-                android:layout_marginStart="20dp"
-                android:layout_marginBottom="12dp" />
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/albumList2Recycler"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:nestedScrollingEnabled="false"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp" />
-
             <!-- Playlists Section Header -->
             <LinearLayout
                 android:layout_width="match_parent"

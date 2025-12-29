@@ -123,12 +123,14 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-ui:1.8.0")
     implementation("androidx.media3:media3-session:1.8.0")
+    implementation("androidx.media3:media3-exoplayer-dash:1.2.0")
 
     // Palette for extracting dominant colors from album art
     implementation("androidx.palette:palette:1.0.0")
     
     // Use a Java ID3 library to write tags (ffmpeg-kit binaries retired).
     implementation("com.mpatric:mp3agic:0.9.1")
+    implementation("com.github.AdrienPoupa:jaudiotagger:2.2.3")
     // Library to write tags for FLAC/OGG/MP3 and other formats
     // FLAC tagging is implemented in-project; no external jaudiotagger dependency
     

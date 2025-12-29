@@ -2,79 +2,84 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     package="com.example.moniq">
-    
+
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- ADD THESE TWO PERMISSIONS -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    
+
     <application
-        android:allowBackup="true"
         android:name=".MoniqApp"
+        android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:largeHeap="true"
         android:theme="@style/Theme.Moniq">
+
+        com.example.moniq.player.PlaybackService
         
-        <!-- UPDATE THIS SERVICE DECLARATION -->
-        <service 
-            android:name="com.example.moniq.player.PlaybackService" 
-            android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
-        
-        <!-- LoginActivity is now the launcher (first screen) -->
+        <!-- Playback Service -->
+        <service
+    android:name="com.example.moniq.player.PlaybackService"
+    android:enabled="true"
+    android:exported="false"
+    android:foregroundServiceType="mediaPlayback" />
+
+        <!--HOME ACTIVITY = LAUNCHER -->
         <activity
-            android:name=".LoginActivity"
+            android:name=".HomeActivity"
             android:exported="true"
-            android:label="@string/title_login"
+            android:label="@string/title_home"
             android:theme="@style/Theme.Moniq">
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
         </activity>
-        
-        <!-- MainActivity is no longer the launcher -->
+
+        <!-- Other Activities -->
         <activity
             android:name=".MainActivity"
             android:exported="false"
-            android:label="@string/app_name"
             android:theme="@style/Theme.Moniq" />
-            
-        <activity
-            android:name=".HomeActivity"
-            android:exported="false"
-            android:label="@string/title_home"
-            android:theme="@style/Theme.Moniq" />
+
         <activity
             android:name=".AlbumActivity"
             android:exported="false"
-            android:label="@string/title_album"
             android:theme="@style/Theme.Moniq" />
+
         <activity
             android:name=".ArtistActivity"
             android:exported="false"
-            android:label="@string/title_artist"
             android:theme="@style/Theme.Moniq" />
+
         <activity
             android:name=".SearchActivity"
             android:exported="false"
-            android:label="Search"
             android:theme="@style/Theme.Moniq" />
+
         <activity
             android:name=".FullscreenPlayerActivity"
             android:exported="false"
-            android:label="Player"
             android:theme="@style/Theme.Moniq" />
+
         <activity android:name=".SettingsActivity" />
         <activity android:name=".QueueActivity" />
-        <activity android:name=".PlaylistsActivity" android:exported="false" android:label="Playlists" android:theme="@style/Theme.Moniq" />
-        <activity android:name=".PlaylistDetailActivity" android:exported="false" android:label="Playlist" android:theme="@style/Theme.Moniq" />
-        <activity android:name=".NotificationSeekActivity" android:exported="false" android:label="Seek" android:theme="@style/Theme.MaterialComponents.DayNight.Dialog.Alert" />
-        <activity android:name=".RecentlyListActivity" android:exported="false" android:label="Recently Listened" android:theme="@style/Theme.Moniq" />
-        <receiver android:name=".player.NotificationActionReceiver" android:exported="false" />
+        <activity android:name=".PlaylistsActivity" />
+        <activity android:name=".PlaylistDetailActivity" />
+        <activity android:name=".NotificationSeekActivity"
+            android:theme="@style/Theme.MaterialComponents.DayNight.Dialog.Alert" />
+        <activity android:name=".RecentlyListActivity" />
+
+        <receiver
+            android:name=".player.NotificationActionReceiver"
+            android:exported="false" />
+
     </application>
 </manifest>

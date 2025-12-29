@@ -22,6 +22,7 @@ object SessionStore {
     private const val KEY_LAST_TRACK_ALBUM_NAME = "last_track_album_name"
     private const val KEY_DOWNLOAD_DIR = "download_dir"
     private const val KEY_THEME_MODE = "theme_mode"
+    private const val KEY_LAST_TRACK_DURATION = "last_track_duration"  
 
     private fun prefs(context: Context): SharedPreferences {
         return try {
@@ -79,42 +80,46 @@ object SessionStore {
         return prefs(context).getFloat(KEY_PLAYBACK_SPEED, default)
     }
 
-    fun saveLastTrack(
-            context: Context,
-            trackId: String?,
-            posMs: Long,
-            title: String?,
-            artist: String?,
-            artUrl: String?,
-            isPlaying: Boolean,
-            albumId: String? = null,
-            albumName: String? = null
-    ) {
-        prefs(context)
-                .edit()
-                .putString(KEY_LAST_TRACK_ID, trackId)
-                .putLong(KEY_LAST_TRACK_POS, posMs)
-                .putString(KEY_LAST_TRACK_TITLE, title)
-                .putString(KEY_LAST_TRACK_ARTIST, artist)
-                .putString(KEY_LAST_TRACK_ART, artUrl)
-                .putBoolean(KEY_LAST_IS_PLAYING, isPlaying)
-                .putString(KEY_LAST_TRACK_ALBUM_ID, albumId)
-                .putString(KEY_LAST_TRACK_ALBUM_NAME, albumName)
-                .apply()
-    }
+    
+fun saveLastTrack(
+        context: Context,
+        trackId: String?,
+        posMs: Long,
+        title: String?,
+        artist: String?,
+        artUrl: String?,
+        isPlaying: Boolean,
+        albumId: String? = null,
+        albumName: String? = null,
+        duration: Long = 0L  // ADD THIS PARAMETER
+) {
+    prefs(context)
+            .edit()
+            .putString(KEY_LAST_TRACK_ID, trackId)
+            .putLong(KEY_LAST_TRACK_POS, posMs)
+            .putString(KEY_LAST_TRACK_TITLE, title)
+            .putString(KEY_LAST_TRACK_ARTIST, artist)
+            .putString(KEY_LAST_TRACK_ART, artUrl)
+            .putBoolean(KEY_LAST_IS_PLAYING, isPlaying)
+            .putString(KEY_LAST_TRACK_ALBUM_ID, albumId)
+            .putString(KEY_LAST_TRACK_ALBUM_NAME, albumName)
+            .putLong(KEY_LAST_TRACK_DURATION, duration)  // ADD THIS LINE
+            .apply()
+}
 
     fun loadLastTrack(context: Context): LastTrack? {
-        val p = prefs(context)
-        val id = p.getString(KEY_LAST_TRACK_ID, null) ?: return null
-        val pos = p.getLong(KEY_LAST_TRACK_POS, 0L)
-        val title = p.getString(KEY_LAST_TRACK_TITLE, null)
-        val artist = p.getString(KEY_LAST_TRACK_ARTIST, null)
-        val art = p.getString(KEY_LAST_TRACK_ART, null)
-        val playing = p.getBoolean(KEY_LAST_IS_PLAYING, false)
-        val albumId = p.getString(KEY_LAST_TRACK_ALBUM_ID, null)
-        val albumName = p.getString(KEY_LAST_TRACK_ALBUM_NAME, null)
-        return LastTrack(id, pos, title, artist, art, playing, albumId, albumName)
-    }
+    val p = prefs(context)
+    val id = p.getString(KEY_LAST_TRACK_ID, null) ?: return null
+    val pos = p.getLong(KEY_LAST_TRACK_POS, 0L)
+    val title = p.getString(KEY_LAST_TRACK_TITLE, null)
+    val artist = p.getString(KEY_LAST_TRACK_ARTIST, null)
+    val art = p.getString(KEY_LAST_TRACK_ART, null)
+    val playing = p.getBoolean(KEY_LAST_IS_PLAYING, false)
+    val albumId = p.getString(KEY_LAST_TRACK_ALBUM_ID, null)
+    val albumName = p.getString(KEY_LAST_TRACK_ALBUM_NAME, null)
+    val duration = p.getLong(KEY_LAST_TRACK_DURATION, 0L)  // ADD THIS LINE
+    return LastTrack(id, pos, title, artist, art, playing, albumId, albumName, duration)  // ADD duration parameter
+}
 
     fun saveDownloadDirectory(context: Context, uriString: String?) {
         prefs(context).edit().putString(KEY_DOWNLOAD_DIR, uriString).apply()
@@ -134,15 +139,16 @@ object SessionStore {
     }
 
     data class LastTrack(
-            val id: String,
-            val posMs: Long,
-            val title: String?,
-            val artist: String?,
-            val artUrl: String?,
-            val wasPlaying: Boolean,
-            val albumId: String? = null,
-            val albumName: String? = null
-    )
+        val id: String,
+        val posMs: Long,
+        val title: String?,
+        val artist: String?,
+        val artUrl: String?,
+        val wasPlaying: Boolean,
+        val albumId: String? = null,
+        val albumName: String? = null,
+        val duration: Long = 0L  // ADD THIS PARAMETER
+)
 
     // Add these methods to your existing SessionStore object/class
 

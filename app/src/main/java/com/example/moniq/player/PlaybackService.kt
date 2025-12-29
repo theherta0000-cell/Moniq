@@ -6,6 +6,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.moniq.R
 
@@ -15,7 +16,7 @@ class PlaybackService : Service() {
     
     override fun onCreate() {
         super.onCreate()
-        // Create channel ONCE when service is created, not every time it starts
+        Log.d("PlaybackService", "onCreate() called")
         createNotificationChannel()
     }
     
@@ -30,20 +31,36 @@ class PlaybackService : Service() {
                 )
                 ch.description = getString(R.string.notification_channel_description)
                 nm.createNotificationChannel(ch)
-            } catch (_: Exception) {}
+                Log.d("PlaybackService", "Notification channel created")
+            } catch (e: Exception) {
+                Log.e("PlaybackService", "Failed to create notification channel", e)
+            }
         }
     }
+    
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Build notification immediately
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(getString(R.string.notification_channel_name))
-            .setContentText("")
-            .setOngoing(true)
-            .build()
+        Log.d("PlaybackService", "onStartCommand() called")
         
-        // Call startForeground IMMEDIATELY - no try/catch to hide errors
-        startForeground(9999, notification)
+        try {
+            // Build notification immediately
+            val notification = NotificationCompat.Builder(this, channelId)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(getString(R.string.notification_channel_name))
+                .setContentText("Playing")
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+            
+            Log.d("PlaybackService", "About to call startForeground()")
+            startForeground(9999, notification)
+            Log.d("PlaybackService", "startForeground() completed successfully")
+            
+        } catch (e: Exception) {
+            Log.e("PlaybackService", "CRITICAL: Failed in onStartCommand", e)
+            // Try to stop gracefully if startForeground fails
+            stopSelf()
+            return START_NOT_STICKY
+        }
         
         return START_STICKY
     }
@@ -51,9 +68,12 @@ class PlaybackService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
     
     override fun onDestroy() {
+        Log.d("PlaybackService", "onDestroy() called")
         try { 
             stopForeground(STOP_FOREGROUND_REMOVE)
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.e("PlaybackService", "Failed to stop foreground", e)
+        }
         super.onDestroy()
     }
 }

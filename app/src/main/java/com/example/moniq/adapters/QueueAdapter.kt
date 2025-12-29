@@ -9,6 +9,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.moniq.R
 import coil.load
 import com.example.moniq.model.Track
+import com.example.moniq.util.ImageUrlHelper
 
 class QueueAdapter(private var items: List<Track>, private val callbacks: Callback) : RecyclerView.Adapter<QueueAdapter.VH>() {
     private var currentIndex: Int = -1
@@ -52,27 +53,19 @@ class QueueAdapter(private var items: List<Track>, private val callbacks: Callba
         holder.title.text = t.title
         holder.artist.text = t.artist
         // load cover art into queue item (support full URIs or server-side cover IDs)
-        try {
-            val host = com.example.moniq.SessionManager.host
-            val coverId = t.coverArtId ?: t.albumId ?: t.id
-            val coverSrc: String? = when {
-                coverId.isNullOrBlank() -> null
-                coverId.startsWith("http://") || coverId.startsWith("https://") -> coverId
-                coverId.startsWith("content://") || coverId.startsWith("file://") -> coverId
-                host != null -> android.net.Uri.parse(host).buildUpon()
-                    .appendPath("rest").appendPath("getCoverArt.view")
-                    .appendQueryParameter("id", coverId)
-                    .appendQueryParameter("u", com.example.moniq.SessionManager.username ?: "")
-                    .appendQueryParameter("p", com.example.moniq.SessionManager.password ?: "")
-                    .build().toString()
-                else -> null
-            }
-            if (!coverSrc.isNullOrBlank()) {
-                holder.cover?.load(coverSrc) { placeholder(R.drawable.ic_album); crossfade(true) }
-            } else {
-                holder.cover?.setImageResource(R.drawable.ic_album)
-            }
-        } catch (_: Exception) {}
+        val coverId = t.coverArtId ?: t.albumId ?: t.id
+val coverUrl = ImageUrlHelper.getCoverArtUrl(coverId)
+
+if (!coverUrl.isNullOrBlank()) {
+    holder.cover?.load(coverUrl) {
+        placeholder(R.drawable.ic_album)
+        error(R.drawable.ic_album)
+        crossfade(true)
+    }
+} else {
+    holder.cover?.setImageResource(R.drawable.ic_album)
+}
+
         holder.play.setOnClickListener { callbacks.onPlay(position) }
         holder.remove.setOnClickListener { callbacks.onRemove(position) }
         // highlight currently playing

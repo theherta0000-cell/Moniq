@@ -15,6 +15,8 @@ import androidx.lifecycle.lifecycleScope
 import android.util.Log
 import com.example.moniq.R
 import com.example.moniq.model.Album
+import com.example.moniq.util.ImageUrlHelper
+import com.example.moniq.util.ServerManager
 
 class AlbumAdapter(
     var items: List<Album>,
@@ -42,23 +44,15 @@ class AlbumAdapter(
         holder.name.text = if (alb.name.isNullOrBlank()) "(untitled album)" else alb.name
         Log.d("AlbumAdapter", "binding album: id=${alb.id}, name='${alb.name}', artist='${alb.artist}'")
         holder.artist.text = alb.artist ?: ""
-        val host = com.example.moniq.SessionManager.host
-        if (host != null) {
-            val coverId = alb.coverArtId ?: alb.id
-            val coverUri = android.net.Uri.parse(host).buildUpon()
-                .appendPath("rest")
-                .appendPath("getCoverArt.view")
-                .appendQueryParameter("id", coverId)
-                .appendQueryParameter("u", com.example.moniq.SessionManager.username ?: "")
-                .appendQueryParameter("p", com.example.moniq.SessionManager.password ?: "")
-                .build().toString()
-            holder.image.load(coverUri) {
-                placeholder(R.drawable.ic_album)
-                crossfade(true)
-            }
-        } else {
-            holder.image.setImageResource(android.R.drawable.ic_menu_report_image)
-        }
+        // ✅ No longer need SessionManager.host - ImageUrlHelper handles everything
+val coverId = alb.coverArtId ?: alb.id
+val coverUrl = ImageUrlHelper.getCoverArtUrl(coverId)
+
+holder.image.load(coverUrl) {
+    placeholder(R.drawable.ic_album)
+    error(R.drawable.ic_album)  // ✅ Add error handling
+    crossfade(true)
+}
         holder.itemView.setOnClickListener { onClick(alb) }
         
         // Simple long click for compact mode to go to artist
@@ -81,7 +75,7 @@ class AlbumAdapter(
                     try {
                         val repo = com.example.moniq.music.MusicRepository()
                         val tracks = repo.getAlbumTracks(alb.id)
-                        val total = tracks.sumOf { it.durationSec }
+                        val total = tracks.sumOf { it.duration }
                         if (total > 0) {
                             durationCache[alb.id] = total
                             withContext(Dispatchers.Main) {
@@ -103,16 +97,38 @@ class AlbumAdapter(
             if (!alb.artist.isNullOrBlank()) popup.menu.add(alb.artist)
             popup.setOnMenuItemClickListener { mi ->
                 when (mi.title) {
-                    "Download" -> {
-                        val it = android.content.Intent(ctx, com.example.moniq.AlbumActivity::class.java)
-                        it.putExtra("albumId", alb.id)
-                        it.putExtra("albumTitle", alb.name)
-                        it.putExtra("albumArtist", alb.artist)
-                        it.putExtra("startDownload", true)
-                        it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        ctx.startActivity(it)
-                        true
-                    }
+                   "Download" -> {
+    GlobalScope.launch(Dispatchers.IO) {
+        try {
+            val repo = com.example.moniq.music.MusicRepository()
+            val tracks = repo.getAlbumTracks(alb.id)
+            tracks.forEach { track ->
+                val streamUrl = findWorkingStreamUrl(track.id)
+                if (streamUrl == null) {
+                    Log.w("AlbumAdapter", "No server found for: ${track.title}")
+                    return@forEach
+                }
+                com.example.moniq.player.DownloadManager.downloadTrack(
+                    context = ctx,
+                    trackId = track.id,
+                    title = track.title,
+                    artist = track.artist,
+                    album = alb.name,
+                    albumArtUrl = ImageUrlHelper.getCoverArtUrl(alb.coverArtId ?: alb.id),
+                    streamUrl = streamUrl
+                )
+            }
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(ctx, "Album download started", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(ctx, "Download failed: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    true
+}
                     "Add to Playlist" -> {
                         val it = android.content.Intent(ctx, com.example.moniq.AlbumActivity::class.java)
                         it.putExtra("albumId", alb.id)
@@ -210,4 +226,29 @@ class AlbumAdapter(
     }
 
     private val durationCache = mutableMapOf<String, Int>()
+
+   private suspend fun findWorkingStreamUrl(trackId: String): String? = withContext(Dispatchers.IO) {
+    val servers = ServerManager.getOrderedServers()
+    
+    for (server in servers) {
+        try {
+            val testUrl = "$server/track/?id=$trackId"
+            val conn = java.net.URL(testUrl).openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 3000
+            conn.readTimeout = 3000
+            conn.requestMethod = "GET"  // ✅ CHANGED FROM HEAD TO GET
+            
+            if (conn.responseCode == 200) {
+                conn.disconnect()
+                ServerManager.recordSuccess(server)
+                return@withContext "$server/stream/?id=$trackId"
+            }
+            ServerManager.recordFailure(server)
+            conn.disconnect()
+        } catch (e: Exception) {
+            continue
+        }
+    }
+    return@withContext null
+}
 }

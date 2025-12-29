@@ -226,18 +226,26 @@ class SettingsActivity : ComponentActivity() {
     }
 
     private fun updateDownloadValue(uriString: String?) {
-        val downloadValue = findViewById<TextView>(R.id.settings_download_value)
-        if (uriString == null) {
-            downloadValue.text = "Default"
-        } else {
-            // show a short friendly representation
-            try {
-                val uri = Uri.parse(uriString)
-                val last = uri.path?.split('/')?.lastOrNull() ?: uriString
-                downloadValue.text = last
-            } catch (_: Exception) {
+    val downloadValue = findViewById<TextView>(R.id.settings_download_value)
+    if (uriString == null) {
+        val defaultPath = getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC)?.absolutePath 
+            ?: filesDir.absolutePath
+        downloadValue.text = "Default: $defaultPath"
+    } else {
+        try {
+            val uri = android.net.Uri.parse(uriString)
+            val docFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, uri)
+            
+            if (docFile != null) {
+                val path = uri.path?.replace("/tree/primary:", "/storage/emulated/0/") 
+                    ?: docFile.name ?: "Custom location"
+                downloadValue.text = path
+            } else {
                 downloadValue.text = uriString
             }
+        } catch (_: Exception) {
+            downloadValue.text = uriString
         }
     }
+}
 }

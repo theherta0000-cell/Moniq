@@ -1,251 +1,161 @@
 package com.example.moniq.music
 
-import com.example.moniq.SessionManager
+import android.util.Log
 import com.example.moniq.model.Track
-import com.example.moniq.network.OpenSubsonicApi
-import com.example.moniq.network.RetrofitClient
-import com.example.moniq.util.Crypto
-import java.io.StringReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
-import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
+import com.example.moniq.util.ServerManager  
 
 class MusicRepository {
-    suspend fun getAlbumTracks(albumId: String): List<Track> =
-            withContext(Dispatchers.IO) {
-                val host = SessionManager.host ?: throw IllegalStateException("No session host")
-                val username =
-                        SessionManager.username
-                                ?: throw IllegalStateException("No session username")
-                val passwordRaw =
-                        SessionManager.password
-                                ?: throw IllegalStateException("No session password")
-                val legacy = SessionManager.legacy
 
-                val base = normalizeBaseUrl(host)
-                val retrofit = RetrofitClient.create(base)
-                val api = retrofit.create(OpenSubsonicApi::class.java)
-
-                val pwParam = if (legacy) passwordRaw else Crypto.md5(passwordRaw)
-
-                val resp = api.getAlbum(username, pwParam, albumId)
-                val body = resp.body() ?: ""
-
-                val tracks = mutableListOf<Track>()
-                try {
-                    val trimmed = body.trimStart()
-                    if (trimmed.startsWith("{")) {
-                        val root = JSONObject(body)
-                        val sr =
-                                if (root.has("subsonic-response"))
-                                        root.getJSONObject("subsonic-response")
-                                else root
-                        // album may be present
-                        val albumObj =
-        when {
-            sr.has("album") -> sr.get("album")
-            else -> sr.optJSONObject("album") ?: sr
-        }
-val albumCover =
-        if (albumObj is JSONObject)
-                albumObj.optString("coverArt", null)
-                        ?: albumObj.optString("coverArtId", null)
-        else null
-val albumName =
-        if (albumObj is JSONObject)
-                albumObj.optString("name", null) 
-                        ?: albumObj.optString("title", null)
-        else null
-                        val trackArr =
-                                when (albumObj) {
-                                    is JSONObject -> {
-                                        when {
-                                            albumObj.has("song") -> albumObj.get("song")
-                                            albumObj.has("track") -> albumObj.get("track")
-                                            else -> null
-                                        }
-                                    }
-                                    else -> null
-                                }
-
-                        if (trackArr is JSONArray) {
-                            for (i in 0 until trackArr.length()) {
-                                val it = trackArr.optJSONObject(i) ?: continue
-                                val id = it.optString("id", "")
-                                val title = it.optString("title", it.optString("name", ""))
-                                val artist = it.optString("artist", "")
-                                val duration = it.optInt("duration", it.optInt("time", 0))
-                                val trackCover =
-                                        it.optString("coverArt", null)
-                                                ?: it.optString("coverArtId", null) ?: albumCover
-                                val albumId =
-                                        it.optString("albumId", null) ?: it.optString("album", null)
-                                tracks.add(
-        Track(
-                id,
-                title,
-                artist,
-                duration,
-                albumId = albumId,
-                albumName = albumName,
-                coverArtId = trackCover
-        )
-)
-                            }
-                        } else if (trackArr is JSONObject) {
-                            val it = trackArr
-                            val id = it.optString("id", "")
-                            val title = it.optString("title", it.optString("name", ""))
-                            val artist = it.optString("artist", "")
-                            val duration = it.optInt("duration", it.optInt("time", 0))
-                            val trackCover =
-                                    it.optString("coverArt", null)
-                                            ?: it.optString("coverArtId", null) ?: albumCover
-                            val albumId =
-                                    it.optString("albumId", null) ?: it.optString("album", null)
-                            tracks.add(
-        Track(
-                id,
-                title,
-                artist,
-                duration,
-                albumId = albumId,
-                albumName = albumName,
-                coverArtId = trackCover
-        )
-)
-                        }
-                    } else {
-                        // XML fallback
-                        val factory = XmlPullParserFactory.newInstance()
-                        val parser = factory.newPullParser()
-                        parser.setInput(StringReader(body))
-                        var event = parser.eventType
-                        var albumCoverXml: String? = null
-                        while (event != XmlPullParser.END_DOCUMENT) {
-                            if (event == XmlPullParser.START_TAG && parser.name == "album") {
-                                albumCoverXml =
-                                        parser.getAttributeValue(null, "coverArt")
-                                                ?: parser.getAttributeValue(null, "coverArtId")
-                            }
-                            if (event == XmlPullParser.START_TAG && parser.name == "track") {
-                                val id = parser.getAttributeValue(null, "id") ?: ""
-                                val title =
-                                        parser.getAttributeValue(null, "title")
-                                                ?: parser.getAttributeValue(null, "name") ?: ""
-                                val artist = parser.getAttributeValue(null, "artist") ?: ""
-                                val durationStr =
-                                        parser.getAttributeValue(null, "duration")
-                                                ?: parser.getAttributeValue(null, "time") ?: "0"
-                                val duration = durationStr.toIntOrNull() ?: 0
-                                val trackCoverXml =
-                                        parser.getAttributeValue(null, "coverArt")
-                                                ?: parser.getAttributeValue(null, "coverArtId")
-                                                        ?: albumCoverXml
-                                val trackAlbumId =
-                                        parser.getAttributeValue(null, "albumId")
-                                                ?: parser.getAttributeValue(null, "album")
-                                val albumNameXml = parser.getAttributeValue(null, "album")
-        ?: parser.getAttributeValue(null, "albumName")
-tracks.add(
-        Track(
-                id,
-                title,
-                artist,
-                duration,
-                albumId = trackAlbumId,
-                albumName = albumNameXml,
-                coverArtId = trackCoverXml
-        )
-)
-                            }
-                            event = parser.next()
-                        }
-                    }
-                } catch (t: Throwable) {
-                    // Parsing failed: return what we have
+    
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+    
+    suspend fun getAlbumTracks(albumId: String): List<Track> = withContext(Dispatchers.IO) {
+        val orderedServers = ServerManager.getOrderedServers()
+        // Try each server until one succeeds
+        for (server in orderedServers) {
+            try {
+                val url = "$server/album/?id=$albumId"
+                Log.d("MusicRepository", "Fetching album from: $url")
+                
+                val request = Request.Builder()
+    .url(url)
+    .addHeader("Accept", "application/json")
+    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+    .addHeader("x-client", "BiniLossless/v3.3")  // Add the required header
+    .build()
+                
+                val response = client.newCall(request).execute()
+                if (!response.isSuccessful) {
+                    ServerManager.recordFailure(server)  // ADD THIS
+                    continue
                 }
-
-                tracks
+                
+                val body = response.body?.string() ?: continue
+                val tracks = parseAlbumTracks(body, server)
+                
+                if (tracks.isNotEmpty()) {
+                    ServerManager.recordSuccess(server)  // ADD THIS
+                    Log.i("MusicRepository", "Successfully fetched ${tracks.size} tracks from $server")
+                    return@withContext tracks
+                }
+            } catch (e: Exception) {
+                ServerManager.recordFailure(server)  // ADD THIS
+                Log.w("MusicRepository", "Failed to fetch album from $server: ${e.message}")
             }
-
-    private fun normalizeBaseUrl(host: String): String {
-        var h = host.trim()
-        if (!h.startsWith("http://") && !h.startsWith("https://")) {
-            h = "https://$h"
         }
-        if (!h.endsWith("/")) h += "/"
-        return h
+        
+        emptyList()
     }
-
-        suspend fun getAlbumList2(type: String, size: Int = 20, artistId: String? = null): List<com.example.moniq.model.Album> =
-                withContext(Dispatchers.IO) {
-                        val host = SessionManager.host ?: throw IllegalStateException("No session host")
-                        val username = SessionManager.username ?: throw IllegalStateException("No session username")
-                        val passwordRaw = SessionManager.password ?: throw IllegalStateException("No session password")
-                        val legacy = SessionManager.legacy
-
-                        val base = normalizeBaseUrl(host)
-                        val retrofit = RetrofitClient.create(base)
-                        val api = retrofit.create(OpenSubsonicApi::class.java)
-
-                        val pwParam = if (legacy) passwordRaw else Crypto.md5(passwordRaw)
-
-                        val resp = api.getAlbumList2(username, pwParam, type, artistId)
-                        val body = resp.body() ?: ""
-                        val albums = mutableListOf<com.example.moniq.model.Album>()
-
-                        try {
-                                val trimmed = body.trimStart()
-                                if (trimmed.startsWith("{")) {
-                                        val root = org.json.JSONObject(body)
-                                        val sr = if (root.has("subsonic-response")) root.getJSONObject("subsonic-response") else root
-                                        val lists = when {
-                                                sr.has("albumList2") -> sr.get("albumList2")
-                                                sr.has("albumList") -> sr.get("albumList")
-                                                else -> null
-                                        }
-                                        if (lists is org.json.JSONObject) {
-                                                val arr = when {
-                                                        lists.has("album") -> lists.get("album")
-                                                        else -> null
-                                                }
-                                                if (arr is org.json.JSONArray) {
-                                                        for (i in 0 until arr.length()) {
-                                                                val it = arr.optJSONObject(i) ?: continue
-                                                                val id = it.optString("id", "")
-                                                                val name = it.optString("name", it.optString("title", ""))
-                                                                val artist = it.optString("artist", "")
-                                                                val year = it.optInt("year", -1).let { if (it <= 0) null else it }
-                                                                val cover = it.optString("coverArt", null) ?: it.optString("coverArtId", null)
-                                                                albums.add(com.example.moniq.model.Album(id, name, artist, year, cover))
-                                                        }
-                                                }
-                                        }
-                                } else {
-                                        // XML fallback
-                                        val factory = XmlPullParserFactory.newInstance()
-                                        val parser = factory.newPullParser()
-                                        parser.setInput(StringReader(body))
-                                        var event = parser.eventType
-                                        while (event != XmlPullParser.END_DOCUMENT) {
-                                                if (event == XmlPullParser.START_TAG && parser.name == "album") {
-                                                        val id = parser.getAttributeValue(null, "id") ?: ""
-                                                        val name = parser.getAttributeValue(null, "name") ?: parser.getAttributeValue(null, "title") ?: ""
-                                                        val artist = parser.getAttributeValue(null, "artist") ?: ""
-                                                        val yearStr = parser.getAttributeValue(null, "year")
-                                                        val year = yearStr?.toIntOrNull()
-                                                        val cover = parser.getAttributeValue(null, "coverArt") ?: parser.getAttributeValue(null, "coverArtId")
-                                                        albums.add(com.example.moniq.model.Album(id, name, artist, year, cover))
-                                                }
-                                                event = parser.next()
-                                        }
-                                }
-                        } catch (_: Throwable) {}
-
-                        albums
+    
+    private fun parseAlbumTracks(body: String, server: String): List<Track> {
+    val tracks = mutableListOf<Track>()
+    
+    try {
+        val root = JSONObject(body)
+        val data = root.optJSONObject("data") ?: return tracks
+        val items = data.optJSONArray("items") ?: return tracks
+        
+        // Get album info from first track
+        var albumCover: String? = null
+        var albumName: String? = null
+        
+        for (i in 0 until items.length()) {
+            val itemWrapper = items.optJSONObject(i) ?: continue
+            val item = itemWrapper.optJSONObject("item") ?: continue
+            
+            val trackId = item.optString("id", "")
+            val title = item.optString("title", "Unknown")
+            val duration = item.optInt("duration", 0)
+            
+            // Validate duration
+            if (duration <= 0) {
+                Log.w("MusicRepository", "Track '$title' has invalid duration: $duration seconds")
+            }
+            
+            // Parse artist
+            val artistObj = item.optJSONObject("artist")
+            val artistName = artistObj?.optString("name", "Unknown Artist") ?: "Unknown Artist"
+            
+            // Parse album
+            val albumObj = item.optJSONObject("album")
+            if (albumObj != null) {
+                if (albumName == null) {
+                    albumName = albumObj.optString("title", "Unknown Album")
                 }
+                if (albumCover == null) {
+                    albumCover = albumObj.optString("cover", null)
+                }
+            }
+            
+            val albumId = albumObj?.optString("id", "") ?: ""
+            
+            // Parse audio quality info
+            val audioQuality = item.optString("audioQuality", null)
+            val audioModesArray = item.optJSONArray("audioModes")
+            val audioModes = if (audioModesArray != null) {
+                (0 until audioModesArray.length()).mapNotNull { 
+                    audioModesArray.optString(it)?.takeIf { it.isNotBlank() }
+                }
+            } else null
+            
+            // ✅ NEW: Parse mediaMetadata.tags
+            val mediaMetadataTags = try {
+                val mediaMetadata = item.optJSONObject("mediaMetadata")
+                val tagsArray = mediaMetadata?.optJSONArray("tags")
+                if (tagsArray != null) {
+                    (0 until tagsArray.length()).mapNotNull { 
+                        tagsArray.optString(it)?.takeIf { it.isNotBlank() }
+                    }
+                } else null
+            } catch (e: Exception) {
+                Log.w("MusicRepository", "Failed to parse mediaMetadata.tags for '$title'")
+                null
+            }
+            
+            // Store raw UUID - ImageUrlHelper will convert to Tidal URL
+            val track = Track(
+                id = trackId,
+                title = title,
+                artist = artistName,
+                duration = duration,
+                albumId = albumId,
+                albumName = albumName,
+                coverArtId = albumCover,
+                streamUrl = "$server/stream/?id=$trackId",
+                audioQuality = audioQuality,
+                audioModes = audioModes,
+                mediaMetadataTags = mediaMetadataTags  // ✅ ADD THIS
+            )
+            
+            Log.d("MusicRepository", "Parsed track: '$title', dur=${duration}s, quality=$audioQuality, tags=$mediaMetadataTags")
+            
+            // Only add tracks with valid duration
+            if (duration > 0) {
+                tracks.add(track)
+            } else {
+                Log.w("MusicRepository", "Skipping track with 0 duration: $title")
+            }
+        }
+    } catch (e: Exception) {
+        Log.e("MusicRepository", "Error parsing album tracks", e)
+    }
+    
+    return tracks
+}
+    
+    suspend fun getAlbumList2(type: String, size: Int = 20, artistId: String? = null): List<com.example.moniq.model.Album> = 
+        withContext(Dispatchers.IO) {
+            // This endpoint might not be available in the new API
+            // Return empty list for now
+            emptyList()
+        }
 }

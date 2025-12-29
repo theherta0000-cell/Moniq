@@ -12,10 +12,22 @@ class RecentlyPlayedManager(private val ctx: Context) {
     private val countsKey = "recent_counts"
 
     fun add(track: Track) {
-        val arr = JSONArray(prefs.getString(key, "[]"))
-        // remove existing with same id
-        val newArr = JSONArray()
-        newArr.put(trackToJson(track))
+    // Validate duration before adding - reject if it's suspiciously short (unless it actually is short)
+    if (track.duration > 0 && track.duration < 30) {
+        android.util.Log.w("RecentlyPlayedManager", "Rejecting track with suspicious duration: ${track.title} (${track.duration}s)")
+        return
+    }
+    
+    // Also reject if duration is 0 (invalid)
+    if (track.duration == 0) {
+        android.util.Log.w("RecentlyPlayedManager", "Rejecting track with 0 duration: ${track.title}")
+        return
+    }
+    
+    val arr = JSONArray(prefs.getString(key, "[]"))
+    // remove existing with same id
+    val newArr = JSONArray()
+    newArr.put(trackToJson(track))
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
             if (o.optString("id") == track.id) continue
@@ -111,47 +123,47 @@ class RecentlyPlayedManager(private val ctx: Context) {
     }
 
     private fun trackToJson(t: Track): JSONObject {
-    val o = JSONObject()
-    o.put("id", t.id)
-    o.put("title", t.title)
-    o.put("artist", t.artist)
-    o.put("albumId", t.albumId)
-    o.put("albumName", t.albumName)
-    o.put("durationSec", t.durationSec)  // ADD THIS LINE
-    // Normalize coverArtId to an absolute URL when possible so recent items always show covers
-    val cover = when {
-        t.coverArtId.isNullOrBlank() -> null
-        t.coverArtId.startsWith("http") -> t.coverArtId
-        SessionManager.host != null -> android.net.Uri.parse(SessionManager.host).buildUpon()
-            .appendPath("rest").appendPath("getCoverArt.view")
-            .appendQueryParameter("id", t.coverArtId)
-            .appendQueryParameter("u", SessionManager.username ?: "")
-            .appendQueryParameter("p", SessionManager.password ?: "")
-            .build().toString()
-        else -> t.coverArtId
+        val o = JSONObject()
+        o.put("id", t.id)
+        o.put("title", t.title)
+        o.put("artist", t.artist)
+        o.put("albumId", t.albumId)
+        o.put("albumName", t.albumName)
+        o.put("duration", t.duration)  // FIXED: was "durationSec", t.durationSec
+        // Normalize coverArtId to an absolute URL when possible so recent items always show covers
+        val cover = when {
+            t.coverArtId.isNullOrBlank() -> null
+            t.coverArtId.startsWith("http") -> t.coverArtId
+            SessionManager.host != null -> android.net.Uri.parse(SessionManager.host).buildUpon()
+                .appendPath("rest").appendPath("getCoverArt.view")
+                .appendQueryParameter("id", t.coverArtId)
+                .appendQueryParameter("u", SessionManager.username ?: "")
+                .appendQueryParameter("p", SessionManager.password ?: "")
+                .build().toString()
+            else -> t.coverArtId
+        }
+        o.put("coverArtId", cover)
+        return o
     }
-    o.put("coverArtId", cover)
-    return o
-}
 
     private fun jsonToTrack(o: JSONObject): Track? {
-    val id = o.optString("id", null) ?: return null
-    val title = o.optString("title", "")
-    val artist = o.optString("artist", "")
-    val albumId = o.optString("albumId", null)
-    val albumName = o.optString("albumName", null)
-    val coverArt = o.optString("coverArtId", null)
-    val durationSec = o.optInt("durationSec", 0)  // READ THE DURATION
-    return Track(
-        id = id,
-        title = title,
-        artist = artist,
-        durationSec = durationSec,  // USE THE DURATION
-        albumId = albumId,
-        albumName = albumName,
-        coverArtId = coverArt
-    )
-}
+        val id = o.optString("id", null) ?: return null
+        val title = o.optString("title", "")
+        val artist = o.optString("artist", "")
+        val albumId = o.optString("albumId", null)
+        val albumName = o.optString("albumName", null)
+        val coverArt = o.optString("coverArtId", null)
+        val duration = o.optInt("duration", 0)  // FIXED: was "durationSec"
+        return Track(
+            id = id,
+            title = title,
+            artist = artist,
+            duration = duration,  // FIXED: was durationSec parameter
+            albumId = albumId,
+            albumName = albumName,
+            coverArtId = coverArt
+        )
+    }
 
     /**
      * Update the stored coverArtId for an existing recent entry by track id.

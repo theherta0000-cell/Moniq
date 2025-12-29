@@ -100,12 +100,17 @@ class HomeActivity : ComponentActivity() {
         AudioPlayer.currentTitle.observe(this) { t -> miniTitle?.text = t ?: ""; updateMiniplayerVisibility() }
         AudioPlayer.currentArtist.observe(this) { a -> miniArtist?.text = a ?: ""; updateMiniplayerVisibility() }
         AudioPlayer.currentAlbumArt.observe(this) { artUrl ->
-            if (artUrl.isNullOrBlank()) {
-                miniArt?.setImageResource(R.drawable.ic_album)
-            } else {
-                miniArt?.load(artUrl) { placeholder(R.drawable.ic_album); crossfade(true) }
-            }
+    val loadUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(artUrl)
+    if (loadUrl.isNullOrBlank()) {
+        miniArt?.setImageResource(R.drawable.ic_album)
+    } else {
+        miniArt?.load(loadUrl) { 
+            placeholder(R.drawable.ic_album)
+            error(R.drawable.ic_album)
+            crossfade(true) 
         }
+    }
+}
         AudioPlayer.isPlaying.observe(this) { playing ->
             if (playing == true) {
                 miniPlay?.setImageResource(android.R.drawable.ic_media_pause)
@@ -157,34 +162,17 @@ class HomeActivity : ComponentActivity() {
         val recentRecycler = findViewById<androidx.recyclerview.widget.RecyclerView?>(R.id.recentRecycler)
 
         val recentAdapter = com.example.moniq.adapters.TrackAdapter(emptyList(), onPlay = { t, _ ->
-            val coverId = t.coverArtId ?: t.albumId ?: t.id
-            val albumArtUrl = if (SessionManager.host != null) {
-                // if coverId looks like a URL, use it directly
-                if (coverId.startsWith("http")) coverId
-                else android.net.Uri.parse(SessionManager.host).buildUpon()
-                    .appendPath("rest").appendPath("getCoverArt.view")
-                    .appendQueryParameter("id", coverId)
-                    .appendQueryParameter("u", SessionManager.username ?: "")
-                    .appendQueryParameter("p", SessionManager.password ?: "")
-                    .build().toString()
-            } else null
-            AudioPlayer.playTrack(this@HomeActivity, t.id, t.title, t.artist, albumArtUrl, t.albumId, t.albumName)
-        }, onDownload = { t ->
-            lifecycleScope.launch {
-                val coverId = t.coverArtId ?: t.albumId ?: t.id
-                val albumArtUrl = if (SessionManager.host != null) {
-                    if (coverId.startsWith("http")) coverId
-                    else android.net.Uri.parse(SessionManager.host).buildUpon()
-                        .appendPath("rest").appendPath("getCoverArt.view")
-                        .appendQueryParameter("id", coverId)
-                        .appendQueryParameter("u", SessionManager.username ?: "")
-                        .appendQueryParameter("p", SessionManager.password ?: "")
-                        .build().toString()
-                } else null
-                val ok = com.example.moniq.player.DownloadManager.downloadTrack(this@HomeActivity, t.id, t.title, t.artist, null, albumArtUrl)
-                android.widget.Toast.makeText(this@HomeActivity, if (ok) "Downloaded" else "Download failed", android.widget.Toast.LENGTH_LONG).show()
-            }
-        }, onAddToPlaylist = { t ->
+    val coverId = t.coverArtId ?: t.albumId ?: t.id
+    val albumArtUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(coverId)
+    AudioPlayer.playTrack(this@HomeActivity, t.id, t.title, t.artist, albumArtUrl, t.albumId, t.albumName)
+}, onDownload = { t ->
+    lifecycleScope.launch {
+        val coverId = t.coverArtId ?: t.albumId ?: t.id
+        val albumArtUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(coverId)
+        val ok = com.example.moniq.player.DownloadManager.downloadTrack(this@HomeActivity, t.id, t.title, t.artist, null, albumArtUrl)
+        android.widget.Toast.makeText(this@HomeActivity, if (ok) "Downloaded" else "Download failed", android.widget.Toast.LENGTH_LONG).show()
+    }
+}, onAddToPlaylist = { t ->
             // show dialog to pick a playlist or create a new one
             val pm = com.example.moniq.player.PlaylistManager(this@HomeActivity.applicationContext)
             val playlists = pm.list()
@@ -240,25 +228,6 @@ class HomeActivity : ComponentActivity() {
             // refresh recent, album picks, and playlists
             try { loadRecent() } catch (_: Exception) {}
             try {
-                lifecycleScope.launch {
-                    try {
-                        val repo = com.example.moniq.music.MusicRepository()
-                        val albums = repo.getAlbumList2("random")
-                        val picked = albums.take(10)
-                        val albumList2TitleLocal = findViewById<android.widget.TextView?>(R.id.albumList2Title)
-                        val albumList2RecyclerLocal = findViewById<androidx.recyclerview.widget.RecyclerView?>(R.id.albumList2Recycler)
-                        if (picked.isEmpty()) {
-                            com.example.moniq.util.ViewUtils.animateVisibility(albumList2TitleLocal, false)
-                            com.example.moniq.util.ViewUtils.animateVisibility(albumList2RecyclerLocal, false)
-                        } else {
-                            com.example.moniq.util.ViewUtils.animateVisibility(albumList2TitleLocal, true)
-                            com.example.moniq.util.ViewUtils.animateVisibility(albumList2RecyclerLocal, true)
-                            (albumList2RecyclerLocal?.adapter as? com.example.moniq.adapters.AlbumAdapter)?.update(picked)
-                        }
-                    } catch (_: Exception) {}
-                }
-            } catch (_: Exception) {}
-            try {
                 val pmLocal = com.example.moniq.player.PlaylistManager(this.applicationContext)
                 val playlists = pmLocal.list()
                 val playlistsRecyclerLocal = findViewById<androidx.recyclerview.widget.RecyclerView?>(R.id.homePlaylistsRecycler)
@@ -270,47 +239,6 @@ class HomeActivity : ComponentActivity() {
 
         // initial load
         loadRecent()
-
-        // Load AlbumList2 below Recently Played
-        val albumList2Recycler = findViewById<androidx.recyclerview.widget.RecyclerView?>(R.id.albumList2Recycler)
-        val albumList2Title = findViewById<android.widget.TextView?>(R.id.albumList2Title)
-       val albumAdapter = com.example.moniq.adapters.AlbumAdapter(
-            emptyList(), 
-            onClick = { album ->
-                val intent = Intent(this, AlbumActivity::class.java)
-                intent.putExtra("albumId", album.id)
-                intent.putExtra("albumTitle", album.name)
-                intent.putExtra("albumArtist", album.artist)
-                startActivity(intent)
-            },
-            compact = true,
-            onLongClick = { album ->
-                if (!album.artist.isNullOrBlank()) {
-                    val intent = Intent(this, SearchActivity::class.java)
-                    intent.putExtra("query", album.artist)
-                    intent.putExtra("filter", "ARTISTS")
-                    startActivity(intent)
-                }
-            }
-        )
-        albumList2Recycler?.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this, androidx.recyclerview.widget.LinearLayoutManager.HORIZONTAL, false)
-        albumList2Recycler?.adapter = albumAdapter
-        lifecycleScope.launch {
-            try {
-                val repo = com.example.moniq.music.MusicRepository()
-                val albums = repo.getAlbumList2("random")
-                android.util.Log.d("HomeActivity", "Fetched albums: ${albums.size}")
-                val picked = albums.take(10)
-                if (picked.isEmpty()) {
-                    com.example.moniq.util.ViewUtils.animateVisibility(albumList2Title, false)
-                    com.example.moniq.util.ViewUtils.animateVisibility(albumList2Recycler, false)
-                } else {
-                    com.example.moniq.util.ViewUtils.animateVisibility(albumList2Title, true)
-                    com.example.moniq.util.ViewUtils.animateVisibility(albumList2Recycler, true)
-                    albumAdapter.update(picked)
-                }
-            } catch (_: Exception) {}
-        }
 
         // Wire Playlists "See All" button on home
         val playlistsSeeAll = findViewById<com.google.android.material.button.MaterialButton?>(R.id.home_playlists_see_all)

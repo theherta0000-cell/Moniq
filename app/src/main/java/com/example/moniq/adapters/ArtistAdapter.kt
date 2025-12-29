@@ -27,27 +27,20 @@ class ArtistAdapter(
     }
 
     override fun onBindViewHolder(holder: VH, position: Int) {
-        val a = items[position]
-        holder.tv.text = a.name
-        val host = com.example.moniq.SessionManager.host
-        if (host != null) {
-            val coverId = a.coverArtId ?: a.id
-            val coverUri = android.net.Uri.parse(host).buildUpon()
-                .appendPath("rest")
-                .appendPath("getCoverArt.view")
-                .appendQueryParameter("id", coverId)
-                .appendQueryParameter("u", com.example.moniq.SessionManager.username ?: "")
-                .appendQueryParameter("p", com.example.moniq.SessionManager.password ?: "")
-                .build().toString()
-            holder.iv.load(coverUri) {
-                placeholder(R.drawable.ic_music_note)
-                crossfade(true)
-            }
-        } else {
-            holder.iv.setImageResource(android.R.drawable.ic_menu_myplaces)
-        }
-        holder.itemView.setOnClickListener { onClick(a) }
-    }
+    val a = items[position]
+    holder.tv.text = a.name
+    
+    // Check if coverArtId is already a full URL or just an ID
+val coverUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(a.coverArtId)
+
+holder.iv.load(coverUrl) {
+    placeholder(R.drawable.ic_music_note)
+    error(R.drawable.ic_music_note)
+    crossfade(true)
+}
+    
+    holder.itemView.setOnClickListener { onClick(a) }
+}
 
     override fun getItemCount(): Int = items.size
 

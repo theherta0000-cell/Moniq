@@ -15,7 +15,7 @@ import kotlinx.coroutines.withContext
 class PlaylistImporter(private val ctx: Context) {
     val importing = MutableLiveData(false)
     val progress = MutableLiveData(0) // 0..100
-    data class ImportResult(val originalQuery: String, val matched: com.example.moniq.model.Track?)
+    data class ImportResult(val originalQuery: String, val matched: Track?)
 
     fun importInto(playlistId: String, uri: Uri, onComplete: (imported: Int, details: List<ImportResult>) -> Unit = {_,_->}) {
         val pm = PlaylistManager(ctx)
@@ -134,15 +134,21 @@ class PlaylistImporter(private val ctx: Context) {
                                         } else candidates
 
                                         val tol = 4
-                                        var chosen: com.example.moniq.model.Track? = null
+                                        var chosen: Track? = null
                                         if (parsedDurationSec != null) {
                                             for (cand in strongFiltered) {
-                                                try { if (kotlin.math.abs(cand.durationSec - parsedDurationSec) <= tol) { chosen = cand; break } } catch (_: Exception) {}
+                                                try { 
+                                                    // FIXED: was cand.durationSec
+                                                    if (kotlin.math.abs(cand.duration - parsedDurationSec) <= tol) { 
+                                                        chosen = cand
+                                                        break 
+                                                    } 
+                                                } catch (_: Exception) {}
                                             }
                                         }
                                         if (chosen == null) {
                                             var bestScore = Int.MIN_VALUE
-                                            var best: com.example.moniq.model.Track? = null
+                                            var best: Track? = null
                                             val pTitle = norm(parsedTitle)
                                             val pTitleWords = pTitle.split(" ").filter { it.isNotBlank() }
                                             for (cand in strongFiltered) {
@@ -158,7 +164,8 @@ class PlaylistImporter(private val ctx: Context) {
                                                     if (nParsedArtist.isNotBlank() && (cArtist.contains(nParsedArtist) || nParsedArtist.contains(cArtist))) score += 500
                                                     if (nParsedAlbum.isNotBlank() && (cAlbum.contains(nParsedAlbum) || nParsedAlbum.contains(cAlbum))) score += 400
                                                     if (parsedDurationSec != null) {
-                                                        val cd = cand.durationSec
+                                                        // FIXED: was cand.durationSec
+                                                        val cd = cand.duration
                                                         val diff = kotlin.math.abs(cd - parsedDurationSec)
                                                         if (diff <= tol) score += 150 else if (diff <= 10) score += 30
                                                     }
@@ -168,8 +175,9 @@ class PlaylistImporter(private val ctx: Context) {
                                             chosen = best ?: strongFiltered.firstOrNull()
                                         }
                                         if (chosen != null) {
-                                            pm.addTrack(playlistId, com.example.moniq.model.Track(chosen.id, chosen.title, chosen.artist, chosen.durationSec, albumId = chosen.albumId, albumName = chosen.albumName, coverArtId = chosen.coverArtId))
-                                            report.add(ImportResult(qCombined, com.example.moniq.model.Track(chosen.id, chosen.title, chosen.artist, chosen.durationSec, albumId = chosen.albumId, albumName = chosen.albumName, coverArtId = chosen.coverArtId)))
+                                            // FIXED: was chosen.durationSec (2 times)
+                                            pm.addTrack(playlistId, Track(chosen.id, chosen.title, chosen.artist, chosen.duration, albumId = chosen.albumId, albumName = chosen.albumName, coverArtId = chosen.coverArtId))
+                                            report.add(ImportResult(qCombined, Track(chosen.id, chosen.title, chosen.artist, chosen.duration, albumId = chosen.albumId, albumName = chosen.albumName, coverArtId = chosen.coverArtId)))
                                             added = true
                                         }
                                     }
@@ -178,15 +186,15 @@ class PlaylistImporter(private val ctx: Context) {
 
                             if (!added) {
                                 val track = when {
-                                    cols.size == 1 -> com.example.moniq.model.Track(cols[0], cols[0], "", 0)
+                                    cols.size == 1 -> Track(cols[0], cols[0], "", 0)
                                     header.isNotEmpty() -> {
                                         val map2 = header.mapIndexed { i, k -> k.lowercase() to (cols.getOrNull(i) ?: "") }.toMap()
                                         val id = map2["id"] ?: map2["track_id"] ?: map2["trackid"] ?: map2["guid"] ?: map2["songid"] ?: cols.getOrNull(0) ?: ""
                                         val title = map2["title"] ?: id
                                         val artist = map2["artist"] ?: ""
-                                        com.example.moniq.model.Track(id, title, artist, 0)
+                                        Track(id, title, artist, 0)
                                     }
-                                    else -> com.example.moniq.model.Track(cols[0], cols.getOrNull(1) ?: cols[0], cols.getOrNull(2) ?: "", 0)
+                                    else -> Track(cols[0], cols.getOrNull(1) ?: cols[0], cols.getOrNull(2) ?: "", 0)
                                 }
                                 pm.addTrack(playlistId, track)
                                 report.add(ImportResult(parsedTitle.ifBlank { cols.getOrNull(0) ?: "" }, null))

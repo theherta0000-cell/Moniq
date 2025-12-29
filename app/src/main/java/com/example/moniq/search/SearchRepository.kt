@@ -1,319 +1,329 @@
 package com.example.moniq.search
 
 import android.util.Log
-import com.example.moniq.SessionManager
 import com.example.moniq.model.Album
 import com.example.moniq.model.Artist
 import com.example.moniq.model.Track
-import com.example.moniq.network.OpenSubsonicApi
-import com.example.moniq.network.RetrofitClient
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
-import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
+import java.net.URLEncoder
+import kotlinx.coroutines.delay
+import com.example.moniq.util.ServerManager
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+
 
 data class SearchResults(
-        val songs: List<Track>,
-        val albums: List<Album>,
-        val artists: List<Artist>,
-        val code: Int = 0,
-        val rawBody: String = ""
+    val songs: List<Track>,
+    val albums: List<Album>,
+    val artists: List<Artist>,
+    val code: Int = 0,
+    val rawBody: String = ""
 )
 
 class SearchRepository {
+    
+
+    
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)  // Increased from 10
+    .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)     // Increased from 15
+    .retryOnConnectionFailure(true)  // ADD THIS
+        .build()
+
     suspend fun search(query: String): SearchResults {
-        val host = SessionManager.host ?: throw IllegalStateException("No host in session")
-        val username = SessionManager.username ?: ""
-        val password = SessionManager.password ?: ""
-
-        val api: OpenSubsonicApi = RetrofitClient.create(host).create(OpenSubsonicApi::class.java)
-        val resp = api.search3(username, password, query)
-        val code =
-                try {
-                    resp.code()
-                } catch (_: Exception) {
-                    -1
-                }
-        val body =
-                try {
-                    resp.body() ?: resp.errorBody()?.string() ?: ""
-                } catch (_: Exception) {
-                    ""
-                }
-
-        // Debug logging: print response code and body to help diagnose search issues
-        try {
-            Log.i("SearchRepository", "search3 response code=${code}, body=${body.take(800)}")
-        } catch (t: Throwable) {
-            // ignore logging errors
+        if (query.isBlank()) {
+            return SearchResults(
+                songs = emptyList(),
+                albums = emptyList(),
+                artists = emptyList(),
+                code = 0,
+                rawBody = ""
+            )
         }
 
-        val songs = mutableListOf<Track>()
-        val albums = mutableListOf<Album>()
-        val artists = mutableListOf<Artist>()
-
-        try {
-            val trimmed = body.trimStart()
-            if (trimmed.startsWith("{")) {
-                // JSON path
-                val root = JSONObject(body)
-                // many servers wrap in "subsonic-response"
-                val sr =
-                        if (root.has("subsonic-response")) root.getJSONObject("subsonic-response")
-                        else root
-                val search =
-                        if (sr.has("searchResult3")) sr.get("searchResult3")
-                        else sr.opt("searchResult3")
-                // searchResult3 may be an object with arrays
-                val searchObj =
-                        when (search) {
-                            is JSONObject -> search as JSONObject
-                            else -> sr.optJSONObject("searchResult3") ?: sr
-                        }
-
-                // artists
-                if (searchObj.has("artist")) {
-                    val a = searchObj.get("artist")
-                    if (a is JSONArray) {
-                        for (i in 0 until a.length()) {
-                            val it = a.optJSONObject(i) ?: continue
-                            val id = it.optString("id", "")
-                            val name = it.optString("name", "")
-                            val cover =
-                                    it.optString("coverArt", null)
-                                            ?: it.optString("coverArtId", null)
-                            artists.add(Artist(id, name, cover))
-                        }
-                    } else if (a is JSONObject) {
-                        val id = a.optString("id", "")
-                        val name = a.optString("name", "")
-                        val cover = a.optString("coverArt", null) ?: a.optString("coverArtId", null)
-                        artists.add(Artist(id, name, cover))
-                    }
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        
+        // Get ordered servers (best ones first)
+        val orderedServers = ServerManager.getOrderedServers()
+        
+        // Try each server one by one until one succeeds
+        for ((index, site) in orderedServers.withIndex()) {
+            try {
+                val result = searchAllTypes(site, encodedQuery, query)
+                if (result != null) {
+                    ServerManager.recordSuccess(site)  // Record success!
+                    Log.i("SearchRepository", "Successfully searched $site")
+                    return result
                 }
-
-                // albums
-if (searchObj.has("album")) {
-    val a = searchObj.get("album")
-    Log.d("SearchRepository", "Found 'album' key, type=${a.javaClass.simpleName}")
-    if (a is JSONArray) {
-        Log.d("SearchRepository", "Album is JSONArray, length=${a.length()}")
-        for (i in 0 until a.length()) {
-            val it = a.optJSONObject(i) ?: continue
-            val id = it.optString("id", "")
-            
-            // Fix: properly handle null/empty title and name fields
-            val titleRaw = if (it.has("title")) it.optString("title", null) else null
-            val nameRaw = if (it.has("name")) it.optString("name", null) else null
-            val name = when {
-                !titleRaw.isNullOrBlank() -> titleRaw
-                !nameRaw.isNullOrBlank() -> nameRaw
-                else -> "Unknown Album"
+            } catch (e: Exception) {
+                ServerManager.recordFailure(site)  // Record failure!
+                Log.w("SearchRepository", "Failed to search $site: ${e.message}")
             }
-            
-            val artist = it.optString("artist", "")
-            val year = it.optInt("year", -1).let { if (it <= 0) null else it }
-            val cover =
-                    it.optString("coverArt", null)
-                            ?: it.optString("coverArtId", null)
-            Log.d("SearchRepository", "Album[$i]: id=$id, name=$name, artist=$artist, year=$year, cover=$cover, rawTitle=$titleRaw, rawName=$nameRaw")
-            albums.add(Album(id, name, artist, year, cover))
-        }
-    } else if (a is JSONObject) {
-        val id = a.optString("id", "")
-        
-        // Fix: properly handle null/empty title and name fields
-        val titleRaw = if (a.has("title")) a.optString("title", null) else null
-        val nameRaw = if (a.has("name")) a.optString("name", null) else null
-        val name = when {
-            !titleRaw.isNullOrBlank() -> titleRaw
-            !nameRaw.isNullOrBlank() -> nameRaw
-            else -> "Unknown Album"
-        }
-        
-        val artist = a.optString("artist", "")
-        val year = a.optInt("year", -1).let { if (it <= 0) null else it }
-        val cover = a.optString("coverArt", null) ?: a.optString("coverArtId", null)
-        Log.d("SearchRepository", "Album (single): id=$id, name=$name, artist=$artist, year=$year, cover=$cover, rawTitle=$titleRaw, rawName=$nameRaw")
-        albums.add(Album(id, name, artist, year, cover))
-    }
-} else {
-    Log.d("SearchRepository", "No 'album' key found in searchObj. Available keys: ${searchObj.keys().asSequence().toList()}")
-}
 
-                // songs / tracks
-                if (searchObj.has("song") || searchObj.has("track")) {
-                    val key = if (searchObj.has("song")) "song" else "track"
-                    val a = searchObj.get(key)
-                    if (a is JSONArray) {
-                        for (i in 0 until a.length()) {
-                            val it = a.optJSONObject(i) ?: continue
-                            val id = it.optString("id", "")
-                            val title = it.optString("title", it.optString("name", ""))
-                            val artist = it.optString("artist", "")
-                            val duration = it.optInt("duration", it.optInt("seconds", 0))
-                            val albumIdStr = it.optString("albumId", null)
-                            val albumNameStr =
-                                    it.optString("album", null) ?: it.optString("albumName", null)
-                            val albumId = albumIdStr ?: null
-                            val cover =
-                                    it.optString("coverArt", null)
-                                            ?: it.optString("coverArtId", null)
-                            songs.add(
-                                    Track(
-                                            id,
-                                            title,
-                                            artist,
-                                            duration,
-                                            albumId = albumId,
-                                            albumName = albumNameStr,
-                                            coverArtId = cover
-                                    )
-                            )
-                        }
-                    } else if (a is JSONObject) {
-                        val id = a.optString("id", "")
-                        val title = a.optString("title", a.optString("name", ""))
-                        val artist = a.optString("artist", "")
-                        val duration = a.optInt("duration", a.optInt("seconds", 0))
-                        val albumIdStr = a.optString("albumId", null)
-                        val albumNameStr =
-                                a.optString("album", null)
-                                        ?: a.optString("albumName", null) // ← FIXED
-                        val albumId = albumIdStr ?: null
-                        val cover = a.optString("coverArt", null) ?: a.optString("coverArtId", null)
-                        songs.add(
-                                Track(
-                                        id,
-                                        title,
-                                        artist,
-                                        duration,
-                                        albumId = albumId,
-                                        albumName = albumNameStr,
-                                        coverArtId = cover
-                                )
-                        )
+            // Wait only 500ms before trying next site
+            if (index < orderedServers.lastIndex) {
+                Log.i("SearchRepository", "Waiting 500ms before next search site...")
+                delay(500)
+            }
+        }
+
+        return SearchResults(
+            songs = emptyList(),
+            albums = emptyList(),
+            artists = emptyList(),
+            code = -1,
+            rawBody = "All search sites failed"
+        )
+    }
+    
+    private suspend fun searchAllTypes(site: String, encodedQuery: String, rawQuery: String): SearchResults? {
+        val songs = mutableListOf<Track>()
+        val albums = mutableMapOf<String, Album>()
+        val artists = mutableMapOf<String, Artist>()
+        
+        // Search tracks: /search/?s=query (MUST succeed)
+        try {
+            val trackUrl = "$site/search/?s=$encodedQuery"
+            val trackBody = fetchUrl(trackUrl) ?: return null
+            parseTrackSearch(trackBody, site, songs)
+        } catch (e: Exception) {
+            Log.w("SearchRepository", "Track search failed on $site: ${e.message}")
+            return null
+        }
+        
+        // Search albums and artists sequentially (simpler, avoids coroutine scope issues)
+        try {
+            val albumUrl = "$site/search/?al=$encodedQuery"
+            val albumBody = fetchUrl(albumUrl)
+            if (albumBody != null) {
+                parseAlbumSearch(albumBody, albums)
+            }
+        } catch (e: Exception) {
+            Log.w("SearchRepository", "Album search failed on $site: ${e.message}")
+        }
+        
+        try {
+            val artistUrl = "$site/search/?a=$encodedQuery"
+            val artistBody = fetchUrl(artistUrl)
+            if (artistBody != null) {
+                parseArtistSearch(artistBody, artists)
+            }
+        } catch (e: Exception) {
+            Log.w("SearchRepository", "Artist search failed on $site: ${e.message}")
+        }
+        
+        return SearchResults(
+            songs = songs,
+            albums = albums.values.toList(),
+            artists = artists.values.toList(),
+            code = 200,
+            rawBody = "Success from $site"
+        )
+    }
+    
+    private suspend fun fetchUrl(url: String): String = withContext(kotlinx.coroutines.Dispatchers.IO) {
+    val request = Request.Builder()
+        .url(url)
+        .addHeader("Accept", "*/*")
+        .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0")
+        .addHeader("x-client", "BiniLossless/v3.3")
+        // REMOVED Accept-Encoding header - let OkHttp handle it automatically
+        .build()
+
+    client.newCall(request).execute().use { response ->
+        val body = response.body?.string() ?: ""
+
+        if (!response.isSuccessful) {
+            throw HttpException(
+                code = response.code,
+                message = response.message,
+                body = body.take(500), // Limit body in error
+                url = url
+            )
+        }
+
+        if (body.isEmpty()) {
+            throw HttpException(
+                code = response.code,
+                message = "Empty response body",
+                body = "",
+                url = url
+            )
+        }
+
+        // Validate that response looks like JSON
+        val trimmed = body.trim()
+        if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+            Log.e("SearchRepository", "Invalid JSON response from $url. Body starts with: ${body.take(100)}")
+            throw HttpException(
+                code = response.code,
+                message = "Response is not valid JSON",
+                body = body.take(500),
+                url = url
+            )
+        }
+
+        body
+    }
+}
+    
+    private fun parseTrackSearch(body: String, site: String, songs: MutableList<Track>) {
+    try {
+        // Validate body before parsing
+        if (body.isBlank() || !body.trim().startsWith("{")) {
+            Log.e("SearchRepository", "Invalid track search response. Body: ${body.take(200)}")
+            throw IllegalArgumentException("Response is not valid JSON")
+        }
+        
+        val root = JSONObject(body)
+        val data = root.optJSONObject("data") ?: return
+        val items = data.optJSONArray("items") ?: return
+
+        for (i in 0 until items.length()) {
+            val item = items.optJSONObject(i) ?: continue
+
+            val trackId = item.opt("id")?.toString() ?: ""
+            val trackTitle = item.optString("title", "Unknown")
+            val duration = item.optInt("duration", 0)
+
+            // Parse artist
+            val artistObj = item.optJSONObject("artist")
+            val artistName = artistObj?.optString("name", "Unknown Artist") ?: "Unknown Artist"
+
+            // Parse album
+            val albumObj = item.optJSONObject("album")
+            val albumId = albumObj?.opt("id")?.toString() ?: ""
+            val albumTitle = albumObj?.optString("title", "") ?: ""
+            val albumCover = albumObj?.optString("cover", null)
+
+            // 🔥 CRITICAL FIX: Parse quality tags from BOTH sources
+            val audioQuality = item.optString("audioQuality", null)
+            
+            val audioModes = mutableListOf<String>()
+            // 1. Top-level audioModes field
+            item.optJSONArray("audioModes")?.let { arr ->
+                for (j in 0 until arr.length()) {
+                    audioModes.add(arr.optString(j))
+                }
+            }
+            // 2. mediaMetadata.tags field (where HIRES_LOSSLESS lives)
+            item.optJSONObject("mediaMetadata")?.optJSONArray("tags")?.let { tagsArr ->
+                for (j in 0 until tagsArr.length()) {
+                    val tag = tagsArr.optString(j)
+                    // Only keep quality tags we care about
+                    if (tag == "HIRES_LOSSLESS" || tag == "DOLBY_ATMOS") {
+                        audioModes.add(tag)
                     }
                 }
-            } else {
-                // XML fallback
-                val factory = XmlPullParserFactory.newInstance()
-                val parser = factory.newPullParser()
-                parser.setInput(body.reader())
+            }
 
-                var event = parser.eventType
-                while (event != XmlPullParser.END_DOCUMENT) {
-                    if (event == XmlPullParser.START_TAG) {
-                        when (parser.name) {
-                            "artist" -> {
-                                val id = parser.getAttributeValue(null, "id") ?: ""
-                                val name = parser.getAttributeValue(null, "name") ?: ""
-                                val cover =
-                                        parser.getAttributeValue(null, "coverArt")
-                                                ?: parser.getAttributeValue(null, "coverArtId")
-                                artists.add(Artist(id, name, cover))
-                            }
-                            "album" -> {
-                                val id = parser.getAttributeValue(null, "id") ?: ""
-                                // Check for "title" first (standard), then fall back to "name"
-                                val title = parser.getAttributeValue(null, "title")
-                                val name = title ?: parser.getAttributeValue(null, "name") ?: ""
-                                val artist = parser.getAttributeValue(null, "artist") ?: ""
-                                val yearStr = parser.getAttributeValue(null, "year")
-                                val year = yearStr?.toIntOrNull()
-                                val cover =
-                                        parser.getAttributeValue(null, "coverArt")
-                                                ?: parser.getAttributeValue(null, "coverArtId")
-                                albums.add(Album(id, name, artist, year, cover))
-                            }
-                            "song", "track" -> {
-                                val id = parser.getAttributeValue(null, "id") ?: ""
-                                val title = parser.getAttributeValue(null, "title") ?: ""
-                                val artist = parser.getAttributeValue(null, "artist") ?: ""
-                                val albumIdRaw = parser.getAttributeValue(null, "albumId")
-                                val albumNameRaw = parser.getAttributeValue(null, "album")
-                                val albumId = albumIdRaw ?: null
-                                val cover =
-                                        parser.getAttributeValue(null, "coverArt")
-                                                ?: parser.getAttributeValue(null, "coverArtId")
-                                val durationStr =
-                                        parser.getAttributeValue(null, "duration")
-                                                ?: parser.getAttributeValue(null, "seconds") ?: "0"
-                                val duration = durationStr.toIntOrNull() ?: 0
-                                songs.add(
-                                        Track(
-                                                id,
-                                                title,
-                                                artist,
-                                                duration,
-                                                albumId = albumId,
-                                                albumName = albumNameRaw,
-                                                coverArtId = cover
-                                        )
-                                )
-                            }
-                        }
-                    }
-                    event = parser.next()
+            val track = Track(
+                id = trackId,
+                title = trackTitle,
+                artist = artistName,
+                duration = duration,
+                albumId = albumId,
+                albumName = albumTitle,
+                coverArtId = albumCover,
+                streamUrl = "$site/stream/?id=$trackId",
+                audioQuality = audioQuality,
+                audioModes = if (audioModes.isNotEmpty()) audioModes else null
+            )
+            songs.add(track)
+        }
+    } catch (e: Exception) {
+        Log.e("SearchRepository", "Error parsing track search", e)
+        throw e // Re-throw to trigger failure in searchAllTypes
+    }
+}
+    
+    private fun parseAlbumSearch(body: String, albums: MutableMap<String, Album>) {
+        try {
+            if (body.isBlank() || !body.trim().startsWith("{")) {
+            Log.e("SearchRepository", "Invalid album search response. Body: ${body.take(200)}")
+            throw IllegalArgumentException("Response is not valid JSON")
+        }
+            val root = JSONObject(body)
+            val data = root.optJSONObject("data") ?: return
+            val albumsData = data.optJSONObject("albums") ?: return
+            val items = albumsData.optJSONArray("items") ?: return
+            
+            for (i in 0 until items.length()) {
+                val item = items.optJSONObject(i) ?: continue
+                
+                // FIX: Album ID is a number
+                val albumId = item.opt("id")?.toString() ?: ""
+                val title = item.optString("title", "Unknown Album")
+                val cover = item.optString("cover", null)
+                val releaseDate = item.optString("releaseDate", null)
+                
+                // Parse artist
+                val artistsArray = item.optJSONArray("artists")
+                val artistName = if (artistsArray != null && artistsArray.length() > 0) {
+                    artistsArray.optJSONObject(0)?.optString("name", "Unknown Artist") ?: "Unknown Artist"
+                } else "Unknown Artist"
+                
+                // Extract year from release date
+                val year = releaseDate?.take(4)?.toIntOrNull()
+                
+                val albumKey = "${title.lowercase()}:${artistName.lowercase()}"
+                if (!albums.containsKey(albumKey)) {
+                    albums[albumKey] = Album(
+                        id = albumId,
+                        name = title,
+                        artist = artistName,
+                        year = year,
+                        coverArtId = cover
+                    )
                 }
             }
         } catch (e: Exception) {
-            Log.w("SearchRepository", "parse error", e)
-            // swallow and return what we have
+            Log.e("SearchRepository", "Error parsing album search", e)
         }
-
-        // Post-parse filtering: sometimes servers return artist-like entries in the album list.
-        // Remove albums that clearly correspond to an artist (same id or very similar name)
-        // unless the album contains explicit artist metadata.
+    }
+    
+    private fun parseArtistSearch(body: String, artists: MutableMap<String, Artist>) {
         try {
-            val artistIds = artists.map { it.id }.toSet()
-            val artistNames = artists.map { it.name.lowercase().trim() }.filter { it.isNotBlank() }
-
-            fun looksLikeArtistByName(albumName: String): Boolean {
-                val aName = albumName.lowercase().trim()
-                if (aName.isEmpty()) return false
-                // Exact match
-                if (artistNames.contains(aName)) return true
-                // Substring match: artist name contained in album name or vice versa
-                for (an in artistNames) {
-                    if (an.isEmpty()) continue
-                    if (aName.contains(an) || an.contains(aName)) return true
-                }
-                return false
-            }
-
-            val filteredAlbums =
-        albums.filter { alb ->
-            val nameLower = alb.name.lowercase().trim()
-            val hasArtistField = !alb.artist.isNullOrBlank()
-            val idLooksLikeArtist = alb.id.isNotBlank() && artistIds.contains(alb.id)
-            val nameLooksLikeArtist = looksLikeArtistByName(nameLower)
-
-            // Keep album if it has an artist, or it doesn't look like an artist entry
-            val keep = hasArtistField || (!idLooksLikeArtist && !nameLooksLikeArtist)
-            if (!keep) {
-                Log.d("SearchRepository", "FILTERED OUT album: id=${alb.id}, name=${alb.name}, hasArtist=$hasArtistField, idLooksLikeArtist=$idLooksLikeArtist, nameLooksLikeArtist=$nameLooksLikeArtist")
-            }
-            keep
+            if (body.isBlank() || !body.trim().startsWith("{")) {
+            Log.e("SearchRepository", "Invalid artist search response. Body: ${body.take(200)}")
+            throw IllegalArgumentException("Response is not valid JSON")
         }
-
-Log.d("SearchRepository", "Albums before filter: ${albums.size}, after filter: ${filteredAlbums.size}")
-
-            return SearchResults(
-                    songs = songs,
-                    albums = filteredAlbums,
-                    artists = artists,
-                    code = code,
-                    rawBody = body
-            )
-        } catch (t: Throwable) {
-            return SearchResults(
-                    songs = songs,
-                    albums = albums,
-                    artists = artists,
-                    code = code,
-                    rawBody = body
-            )
+            val root = JSONObject(body)
+            val data = root.optJSONObject("data") ?: return
+            val artistsData = data.optJSONObject("artists") ?: return
+            val items = artistsData.optJSONArray("items") ?: return
+            
+            for (i in 0 until items.length()) {
+                val item = items.optJSONObject(i) ?: continue
+                
+                // FIX: Artist ID is a number
+                val artistId = item.opt("id")?.toString() ?: ""
+                val artistName = item.optString("name", "Unknown Artist")
+                val picture = item.optString("picture", null)
+                
+                val artistKey = artistName.lowercase()
+                if (!artists.containsKey(artistKey)) {
+                    artists[artistKey] = Artist(
+                        id = artistId,
+                        name = artistName,
+                        coverArtId = picture
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("SearchRepository", "Error parsing artist search", e)
         }
     }
 }
+
+class HttpException(
+    val code: Int,
+    override val message: String,
+    val body: String,
+    val url: String
+) : Exception(
+    "HTTP $code $message\nURL: $url\nBody:\n$body"
+)

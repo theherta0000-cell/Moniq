@@ -62,26 +62,34 @@
 
         <!-- Album art on left side -->
         <com.google.android.material.card.MaterialCardView
-            android:id="@+id/artCard"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintWidth_percent="0.45"
-            app:cardCornerRadius="16dp"
-            app:cardElevation="8dp"
-            android:layout_margin="24dp"
-            app:cardUseCompatPadding="true">
+    android:id="@+id/artCard"
+    android:layout_width="0dp"
+    android:layout_height="0dp"
+    app:layout_constraintTop_toTopOf="parent"
+    app:layout_constraintBottom_toBottomOf="parent"
+    app:layout_constraintStart_toStartOf="parent"
+    app:layout_constraintWidth_percent="0.45"
+    app:cardCornerRadius="16dp"
+    app:cardElevation="8dp"
+    android:layout_margin="24dp"
+    app:cardUseCompatPadding="true">
 
-            <ImageView
-                android:id="@+id/full_art"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:scaleType="centerCrop"
-                android:contentDescription="Cover art" />
+    <ImageView
+        android:id="@+id/full_art"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:contentDescription="Cover art" />
 
-        </com.google.android.material.card.MaterialCardView>
+    <ProgressBar
+        android:id="@+id/fullLoading"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:layout_gravity="center"
+        android:visibility="gone"
+        android:indeterminate="true" />
+
+</com.google.android.material.card.MaterialCardView>
 
         <!-- Right side controls container -->
         <androidx.constraintlayout.widget.ConstraintLayout

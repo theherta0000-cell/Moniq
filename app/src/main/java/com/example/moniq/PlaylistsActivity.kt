@@ -282,12 +282,12 @@ class PlaylistsActivity : ComponentActivity() {
                                 val sel = songs[choice]
                                 withContext(Dispatchers.Main) {
                                     try {
-                                        if (entry.matched != null) manager.replaceTrack(playlistId, entry.matched.id, com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.durationSec, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
-                                        else manager.addTrack(playlistId, com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.durationSec, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
+                                        if (entry.matched != null) manager.replaceTrack(playlistId, entry.matched.id, com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.duration, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
+                                        else manager.addTrack(playlistId, com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.duration, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
                                         // update dialog entry to show matched replacement
                                         val idx = holder.adapterPosition
                                         if (idx >= 0 && idx < items.size) {
-                                            items[idx] = items[idx].copy(matched = com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.durationSec, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
+                                            items[idx] = items[idx].copy(matched = com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.duration, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
                                             notifyItemChanged(idx)
                                         }
                                         adapter.update(manager.list())
@@ -539,7 +539,7 @@ continue
                             if (chosenIndex == null) continue
                             val sel = currentSongs[chosenIndex]
                         try {
-                            manager.addTrack(playlistId, com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.durationSec, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
+                            manager.addTrack(playlistId, com.example.moniq.model.Track(sel.id, sel.title, sel.artist, sel.duration, albumId = sel.albumId, albumName = sel.albumName, coverArtId = sel.coverArtId))
                             imported++
                             adapter.update(manager.list())
                         } catch (_: Exception) {}

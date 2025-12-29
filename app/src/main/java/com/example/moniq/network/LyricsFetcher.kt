@@ -47,6 +47,7 @@ object LyricsFetcher {
                                 .header("Accept", "application/json")
                                 .header("Referer", "https://lyricsplus.prjktla.workers.dev/")
                                 .header("Origin", "https://lyricsplus.prjktla.workers.dev")
+                                .addHeader("x-client", "BiniLossless/v3.3")
                                 .build()
                 var resp = client.newCall(req1).execute()
 
@@ -62,6 +63,7 @@ object LyricsFetcher {
                                     .header("Accept", "application/json")
                                     .header("Referer", "https://lyricsplus.app/")
                                     .header("Origin", "https://lyricsplus.app")
+                                    .addHeader("x-client", "BiniLossless/v3.3")
                                     .build()
                     resp = client.newCall(req2).execute()
                 }
@@ -86,6 +88,7 @@ object LyricsFetcher {
                                     .header("Accept", "application/json")
                                     .header("Referer", "https://lyrics-plus-backend.vercel.app/")
                                     .header("Origin", "https://lyrics-plus-backend.vercel.app")
+                                    .addHeader("x-client", "BiniLossless/v3.3")
                                     .build()
                     resp = client.newCall(req3).execute()
                 }
@@ -106,7 +109,7 @@ object LyricsFetcher {
                         // Extract translation
                         val translationObj = item.optJSONObject("translation")
                         val translation = translationObj?.optString("text")
-
+                        
                         // Extract transliteration syllables array
                         val translitObj = item.optJSONObject("transliteration")
                         val translitSyllArr = translitObj?.optJSONArray("syllabus")
@@ -122,15 +125,15 @@ object LyricsFetcher {
                             val lineDuration = item.optLong("duration", 0L)
 
                             if (lineText.isNotEmpty()) {
-                                // Get transliteration text if available (not as array, but as
-                                // direct text)
+                                // Get transliteration text if available
                                 val translitText = translitObj?.optString("text")
                                 sylls.add(
                                         com.example.moniq.lyrics.Syllable(
                                                 lineTime,
                                                 lineDuration,
                                                 lineText,
-                                                translitText
+                                                translitText,
+                                                false  // Line-level items are never background
                                         )
                                 )
                             }
@@ -141,18 +144,17 @@ object LyricsFetcher {
                                 val time = s.optLong("time", -1L)
                                 val dur = s.optLong("duration", 0L)
                                 val text = s.optString("text", "")
+                                val isBackground = s.optBoolean("isBackground", false)
 
                                 // Get corresponding transliteration syllable
-                                val translit =
-                                        if (translitSyllArr != null && j < translitSyllArr.length()
-                                        ) {
-                                            translitSyllArr.getJSONObject(j).optString("text", null)
-                                        } else {
-                                            null
-                                        }
+                                val translit = if (translitSyllArr != null && j < translitSyllArr.length()) {
+                                    translitSyllArr.getJSONObject(j).optString("text", null)
+                                } else {
+                                    null
+                                }
 
                                 sylls.add(
-                                        com.example.moniq.lyrics.Syllable(time, dur, text, translit)
+                                    com.example.moniq.lyrics.Syllable(time, dur, text, translit, isBackground)
                                 )
                             }
                         }
@@ -160,11 +162,11 @@ object LyricsFetcher {
                         val lineStart = item.optLong("time", -1L)
                         if (sylls.isNotEmpty()) {
                             lines.add(
-                                    com.example.moniq.lyrics.SyllableLine(
-                                            lineStart,
-                                            sylls,
-                                            translation
-                                    )
+                                com.example.moniq.lyrics.SyllableLine(
+                                    lineStart,
+                                    sylls,
+                                    translation
+                                )
                             )
                         }
                     }

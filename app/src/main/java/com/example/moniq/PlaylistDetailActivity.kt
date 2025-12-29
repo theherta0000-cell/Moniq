@@ -48,7 +48,18 @@
 
             var pickImageLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>? = null
             val adapter = TrackAdapter(emptyList(), onPlay = { t, pos -> 
-    AudioPlayer.playTrack(this, t.id, t.title, t.artist, t.coverArtId, t.albumId, t.albumName)
+    android.util.Log.d("PlaylistDetail", "onPlay clicked: track=${t.title} pos=$pos")
+    AudioPlayer.initialize(this)
+    val p = playlistId?.let { manager.get(it) }
+    android.util.Log.d("PlaylistDetail", "Playlist found: ${p != null}, tracks=${p?.tracks?.size}")
+    if (p != null && p.tracks.isNotEmpty()) {
+        android.util.Log.d("PlaylistDetail", "Calling setQueue with ${p.tracks.size} tracks, startIndex=$pos")
+        // Just play directly - AudioPlayer will enrich metadata as needed
+        AudioPlayer.setQueue(p.tracks.toList(), pos)
+    } else {
+        android.util.Log.d("PlaylistDetail", "Fallback to playTrack for single track")
+        AudioPlayer.playTrack(this, t.id, t.title, t.artist, t.coverArtId, t.albumId, t.albumName)
+    }
 }, onDownload = { t ->
                 lifecycleScope.launch {
                     try {
@@ -88,15 +99,15 @@
             
 
             findViewById<android.widget.Button>(R.id.playAllButton).setOnClickListener {
-                val p = playlistId?.let { manager.get(it) } ?: return@setOnClickListener
-                AudioPlayer.setQueue(p.tracks.toList(), 0)
-            }
+    val p = playlistId?.let { manager.get(it) } ?: return@setOnClickListener
+    AudioPlayer.setQueue(p.tracks.toList(), 0)
+}
 
             findViewById<android.widget.Button>(R.id.shuffleButton).setOnClickListener {
-                val p = playlistId?.let { manager.get(it) } ?: return@setOnClickListener
-                val shuffled = p.tracks.shuffled()
-                AudioPlayer.setQueue(shuffled.toList(), 0)
-            }
+    val p = playlistId?.let { manager.get(it) } ?: return@setOnClickListener
+    val shuffled = p.tracks.shuffled()
+    AudioPlayer.setQueue(shuffled, 0)
+}
 
             findViewById<android.widget.Button>(R.id.addByIdButton).setOnClickListener {
                 // Show a searchable picker dialog to find tracks (title/album/artist)
@@ -218,22 +229,7 @@
             useFirstBtn.setOnClickListener {
                 val p = playlistId?.let { manager.get(it) } ?: return@setOnClickListener
                 val first = p.tracks.firstOrNull()
-                val host = com.example.moniq.SessionManager.host
-                var chosen: String? = null
-                if (first != null) {
-                    if (!first.coverArtId.isNullOrBlank()) chosen = first.coverArtId
-                    if (chosen != null && !chosen.startsWith("http") && host != null) {
-                        chosen = android.net.Uri.parse(host)
-                            .buildUpon()
-                            .appendPath("rest")
-                            .appendPath("getCoverArt.view")
-                            .appendQueryParameter("id", chosen)
-                            .appendQueryParameter("u", com.example.moniq.SessionManager.username ?: "")
-                            .appendQueryParameter("p", com.example.moniq.SessionManager.password ?: "")
-                            .build()
-                            .toString()
-                    }
-                }
+                val chosen = first?.coverArtId
                 p.coverArtId = chosen
                 manager.update(p)
                 // refresh UI
@@ -317,55 +313,16 @@
             val coverView = findViewById<android.widget.ImageView>(R.id.playlistCover)
             nameInput.setText(p.name)
             descInput.setText(p.description ?: "")
-            // try to load cover: prefer playlist.coverArtId, else try first track candidates
+            // try to load cover: prefer playlist.coverArtId, else try first track
             val candidates = mutableListOf<String>()
-            if (!p.coverArtId.isNullOrBlank()) candidates.add(p.coverArtId!!)
+            if (!p.coverArtId.isNullOrBlank()) {
+                val artUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(p.coverArtId)
+                if (!artUrl.isNullOrEmpty()) candidates.add(artUrl)
+            }
             val first = p.tracks.firstOrNull()
-            val host = com.example.moniq.SessionManager.host
-            if (first != null) {
-                if (!first.coverArtId.isNullOrBlank()) {
-                    val c = first.coverArtId
-                    if (c!!.startsWith("http")) candidates.add(c)
-                }
-                if (!first.coverArtId.isNullOrBlank() && host != null && !first.coverArtId!!.startsWith("http")) {
-                    candidates.add(
-                            android.net.Uri.parse(host)
-                                    .buildUpon()
-                                    .appendPath("rest")
-                                    .appendPath("getCoverArt.view")
-                                    .appendQueryParameter("id", first.coverArtId)
-                                    .appendQueryParameter("u", com.example.moniq.SessionManager.username ?: "")
-                                    .appendQueryParameter("p", com.example.moniq.SessionManager.password ?: "")
-                                    .build()
-                                    .toString()
-                    )
-                }
-                if (!first.albumId.isNullOrBlank() && host != null) {
-                    candidates.add(
-                            android.net.Uri.parse(host)
-                                    .buildUpon()
-                                    .appendPath("rest")
-                                    .appendPath("getCoverArt.view")
-                                    .appendQueryParameter("id", first.albumId)
-                                    .appendQueryParameter("u", com.example.moniq.SessionManager.username ?: "")
-                                    .appendQueryParameter("p", com.example.moniq.SessionManager.password ?: "")
-                                    .build()
-                                    .toString()
-                    )
-                }
-                if (!first.id.isNullOrBlank() && host != null) {
-                    candidates.add(
-                            android.net.Uri.parse(host)
-                                    .buildUpon()
-                                    .appendPath("rest")
-                                    .appendPath("getCoverArt.view")
-                                    .appendQueryParameter("id", first.id)
-                                    .appendQueryParameter("u", com.example.moniq.SessionManager.username ?: "")
-                                    .appendQueryParameter("p", com.example.moniq.SessionManager.password ?: "")
-                                    .build()
-                                    .toString()
-                    )
-                }
+            if (first != null && !first.coverArtId.isNullOrBlank()) {
+                val artUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(first.coverArtId)
+                if (!artUrl.isNullOrEmpty()) candidates.add(artUrl)
             }
 
             fun tryLoad(index: Int) {

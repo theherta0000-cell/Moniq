@@ -1,5 +1,6 @@
 package com.example.moniq
 
+import androidx.media3.common.Player
 import android.widget.Button
 import android.content.Intent
 import android.os.Bundle
@@ -84,40 +85,53 @@ class SearchActivity : ComponentActivity() {
             intent.putExtra("albumArtist", album.artist)
             startActivity(intent)
         })
-        val trackAdapter = TrackAdapter(emptyList(), onPlay = { t, pos ->
-            val coverId = t.coverArtId ?: t.albumId ?: t.id
-            val albumArtUrl = if (SessionManager.host != null) {
-                android.net.Uri.parse(SessionManager.host).buildUpon()
-                    .appendPath("rest")
-                    .appendPath("getCoverArt.view")
-                    .appendQueryParameter("id", coverId)
-                    .appendQueryParameter("u", SessionManager.username ?: "")
-                    .appendQueryParameter("p", SessionManager.password ?: "")
-                    .build().toString()
-            } else null
-            AudioPlayer.initialize(this)
-            if (currentSearchSongs.isNotEmpty()) {
-                AudioPlayer.setQueue(currentSearchSongs, pos)
-            } else {
-                AudioPlayer.playTrack(this, t.id, t.title, t.artist, albumArtUrl, t.albumId, t.albumName)
-            }
-        }, onDownload = { t ->
-                val filterGroup = findViewById<ChipGroup?>(resources.getIdentifier("searchFilterGroup", "id", packageName))
-            lifecycleScope.launch {
-                val coverId = t.coverArtId ?: t.albumId ?: t.id
-                val albumArtUrl = if (SessionManager.host != null) {
-                    android.net.Uri.parse(SessionManager.host).buildUpon()
-                        .appendPath("rest")
-                        .appendPath("getCoverArt.view")
-                        .appendQueryParameter("id", coverId)
-                        .appendQueryParameter("u", SessionManager.username ?: "")
-                        .appendQueryParameter("p", SessionManager.password ?: "")
-                        .build().toString()
-                } else null
-                val ok = DownloadManager.downloadTrack(this@SearchActivity, t.id, t.title, t.artist, null, albumArtUrl)
-                Toast.makeText(this@SearchActivity, if (ok) "Downloaded" else "Download failed", Toast.LENGTH_LONG).show()
-            }
-        })
+        val trackAdapter = TrackAdapter(
+    emptyList(),
+    onPlay = { t, pos ->
+        // coverArtId is already a full proxy URL from search
+        val albumArtUrl = t.coverArtId
+
+        AudioPlayer.initialize(this)
+
+        if (currentSearchSongs.isNotEmpty()) {
+            AudioPlayer.setQueue(currentSearchSongs, pos)
+        } else {
+            AudioPlayer.playTrack(
+                this,
+                t.id,
+                t.title,
+                t.artist,
+                albumArtUrl,
+                t.albumId,
+                t.albumName
+            )
+        }
+    },
+    onDownload = { t ->
+    lifecycleScope.launch {
+        val albumArtUrl = t.coverArtId
+        Log.d("SearchActivity", "Download clicked for track: ${t.id}, streamUrl: ${t.streamUrl}")
+        
+        val ok = DownloadManager.downloadTrack(
+            this@SearchActivity,
+            t.id,
+            t.title,
+            t.artist,
+            t.albumName,  // ✅ Pass album name
+            albumArtUrl,
+            streamUrl = t.streamUrl  // ✅ Pass streamUrl!
+        )
+        
+        Log.d("SearchActivity", "Download result: $ok")
+        Toast.makeText(
+            this@SearchActivity,
+            if (ok) "Downloaded" else "Download failed",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+}
+)
+
 
         artistsRecycler?.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         artistsRecycler?.adapter = artistAdapter
@@ -128,113 +142,129 @@ class SearchActivity : ComponentActivity() {
 
         // Local UI state updater (queries views directly to avoid scoping issues)
         var currentFilter = "ALL"
-        val updateUIState: () -> Unit = {
-            val hasArtists = vm.artists.value?.isNotEmpty() == true
-            val hasAlbums = vm.albums.value?.isNotEmpty() == true
-            val hasSongs = vm.songs.value?.isNotEmpty() == true
-            val hasError = !vm.error.value.isNullOrEmpty()
-            val isLoading = vm.loading.value == true
+        val activeQualityFilters = mutableSetOf<String>()
+    val updateUIState: () -> Unit = {
+    val hasArtists = vm.artists.value?.isNotEmpty() == true
+    val hasAlbums = vm.albums.value?.isNotEmpty() == true
+    val hasSongs = vm.songs.value?.isNotEmpty() == true
+    val hasError = !vm.error.value.isNullOrEmpty()
+    val isLoading = vm.loading.value == true
+    
 
-            when {
-                isLoading -> {
-                    com.example.moniq.util.ViewUtils.animateVisibility(emptyState, false)
-                    com.example.moniq.util.ViewUtils.animateVisibility(noResultsState, false)
-                }
-                hasError -> {
-                    com.example.moniq.util.ViewUtils.animateVisibility(emptyState, false)
-                    com.example.moniq.util.ViewUtils.animateVisibility(noResultsState, false)
-                }
-                !hasArtists && !hasAlbums && !hasSongs -> {
-                    if (vm.responseCode.value != null) {
-                        com.example.moniq.util.ViewUtils.animateVisibility(noResultsState, true)
-                        com.example.moniq.util.ViewUtils.animateVisibility(emptyState, false)
-                    } else {
-                        com.example.moniq.util.ViewUtils.animateVisibility(emptyState, true)
-                        com.example.moniq.util.ViewUtils.animateVisibility(noResultsState, false)
-                    }
-                }
-                else -> {
-                    com.example.moniq.util.ViewUtils.animateVisibility(emptyState, false)
-                    com.example.moniq.util.ViewUtils.animateVisibility(noResultsState, false)
-                }
-            }
-            // Filter visibility: show chips if we have search results or response code
-            val hasSearchRun = vm.responseCode.value != null || hasArtists || hasAlbums || hasSongs
-            filterGroup?.visibility = if (hasSearchRun && (hasArtists || hasAlbums || hasSongs)) View.VISIBLE else View.GONE
-            // Ensure default selection is All
-            if (filterGroup?.visibility == View.VISIBLE && (filterGroup.checkedChipId == View.NO_ID || filterGroup.checkedChipId == -1)) {
-                chipAll?.isChecked = true
-            }
-            // Apply current filter to sections
-            val checked = filterGroup?.checkedChipId ?: chipAll?.id ?: -1
-            when (checked) {
-                chipSongs?.id -> {
-                    com.example.moniq.util.ViewUtils.animateVisibility(songsSection, hasSongs)
-                    com.example.moniq.util.ViewUtils.animateVisibility(albumsSection, false)
-                    com.example.moniq.util.ViewUtils.animateVisibility(artistsSection, false)
-                }
-                chipAlbums?.id -> {
-                    com.example.moniq.util.ViewUtils.animateVisibility(songsSection, false)
-                    com.example.moniq.util.ViewUtils.animateVisibility(albumsSection, hasAlbums)
-                    com.example.moniq.util.ViewUtils.animateVisibility(artistsSection, false)
-                }
-                chipArtists?.id -> {
-                    com.example.moniq.util.ViewUtils.animateVisibility(songsSection, false)
-                    com.example.moniq.util.ViewUtils.animateVisibility(albumsSection, false)
-                    com.example.moniq.util.ViewUtils.animateVisibility(artistsSection, hasArtists)
-                }
-                else -> { // All
-                    com.example.moniq.util.ViewUtils.animateVisibility(songsSection, hasSongs)
-                    com.example.moniq.util.ViewUtils.animateVisibility(albumsSection, hasAlbums)
-                    com.example.moniq.util.ViewUtils.animateVisibility(artistsSection, hasArtists)
-                }
-            }
-            // Apply filter by hiding/showing sections based on currentFilter
-            when (currentFilter) {
-                "ALL" -> {
-                    com.example.moniq.util.ViewUtils.animateVisibility(songsSection, hasSongs)
-                    com.example.moniq.util.ViewUtils.animateVisibility(albumsSection, hasAlbums)
-                    com.example.moniq.util.ViewUtils.animateVisibility(artistsSection, hasArtists)
-                }
-                "SONGS" -> {
-                    com.example.moniq.util.ViewUtils.animateVisibility(songsSection, hasSongs)
-                    com.example.moniq.util.ViewUtils.animateVisibility(albumsSection, false)
-                    com.example.moniq.util.ViewUtils.animateVisibility(artistsSection, false)
-                }
-                "ALBUMS" -> {
-                    com.example.moniq.util.ViewUtils.animateVisibility(songsSection, false)
-                    com.example.moniq.util.ViewUtils.animateVisibility(albumsSection, hasAlbums)
-                    com.example.moniq.util.ViewUtils.animateVisibility(artistsSection, false)
-                }
-                "ARTISTS" -> {
-                    com.example.moniq.util.ViewUtils.animateVisibility(songsSection, false)
-                    com.example.moniq.util.ViewUtils.animateVisibility(albumsSection, false)
-                    com.example.moniq.util.ViewUtils.animateVisibility(artistsSection, hasArtists)
-                }
+// Handle main states (no animations for better performance)
+    when {
+        isLoading -> {
+            emptyState?.visibility = View.GONE
+            noResultsState?.visibility = View.GONE
+        }
+        hasError -> {
+            emptyState?.visibility = View.GONE
+            noResultsState?.visibility = View.GONE
+        }
+        !hasArtists && !hasAlbums && !hasSongs -> {
+            if (vm.responseCode.value != null) {
+                noResultsState?.visibility = View.VISIBLE
+                emptyState?.visibility = View.GONE
+            } else {
+                emptyState?.visibility = View.VISIBLE
+                noResultsState?.visibility = View.GONE
             }
         }
+        else -> {
+            emptyState?.visibility = View.GONE
+            noResultsState?.visibility = View.GONE
+        }
+    }
+    
+    // Show/hide filter chips
+    val hasSearchRun = vm.responseCode.value != null || hasArtists || hasAlbums || hasSongs
+    filterGroup?.visibility = if (hasSearchRun && (hasArtists || hasAlbums || hasSongs)) View.VISIBLE else View.GONE
+    val audioFormatGroup = findViewById<com.google.android.material.chip.ChipGroup>(R.id.audioFormatChipGroup)
+    audioFormatGroup?.visibility = if (hasSearchRun && (hasArtists || hasAlbums || hasSongs)) View.VISIBLE else View.GONE
+    
+    // Ensure default selection
+    if (filterGroup?.visibility == View.VISIBLE && (filterGroup.checkedChipId == View.NO_ID || filterGroup.checkedChipId == -1)) {
+        chipAll?.isChecked = true
+    }
+    
+    // Apply current filter (single pass, no animations)
+    when (currentFilter) {
+        "ALL" -> {
+            songsSection?.visibility = if (hasSongs) View.VISIBLE else View.GONE
+            albumsSection?.visibility = if (hasAlbums) View.VISIBLE else View.GONE
+            artistsSection?.visibility = if (hasArtists) View.VISIBLE else View.GONE
+        }
+        "SONGS" -> {
+            songsSection?.visibility = if (hasSongs) View.VISIBLE else View.GONE
+            albumsSection?.visibility = View.GONE
+            artistsSection?.visibility = View.GONE
+        }
+        "ALBUMS" -> {
+            songsSection?.visibility = View.GONE
+            albumsSection?.visibility = if (hasAlbums) View.VISIBLE else View.GONE
+            artistsSection?.visibility = View.GONE
+        }
+        "ARTISTS" -> {
+            songsSection?.visibility = View.GONE
+            albumsSection?.visibility = View.GONE
+            artistsSection?.visibility = if (hasArtists) View.VISIBLE else View.GONE
+        }
+    }
+}
 
         // Show empty state initially
         emptyState?.visibility = View.VISIBLE
 
+        // FIXED QUALITY FILTER CHIPS WITH DEBUG LOGS
+        val audioFormatGroup = findViewById<com.google.android.material.chip.ChipGroup>(R.id.audioFormatChipGroup)!!
+        val chipLossless = audioFormatGroup.findViewById<Chip>(R.id.chipLossless)!!
+        val chipHiRes = audioFormatGroup.findViewById<Chip>(R.id.chipHiRes)!!
+        val chipAtmos = audioFormatGroup.findViewById<Chip>(R.id.chipAtmos)!!
+
+        listOf(
+            chipLossless to "LOSSLESS",
+            chipHiRes to "HIRES",
+            chipAtmos to "ATMOS"
+        ).forEach { (chip, filterType) ->
+            chip.setOnCheckedChangeListener { _, isChecked ->
+                Log.d("CHIP_DEBUG", "Checked changed ${chip.text}, checked=$isChecked, activeFilters=$activeQualityFilters")
+                if (isChecked) {
+                    activeQualityFilters.add(filterType)
+                } else {
+                    activeQualityFilters.remove(filterType)
+                }
+                Log.d("CHIP_DEBUG", "After change: activeFilters=$activeQualityFilters")
+                // Manually trigger the song observer to re-filter
+                vm.songs.value?.let { vm.songs.postValue(it) }
+            }
+        }
+
         // Search action (use local function to allow return)
         fun performSearch() {
-            val q = queryInput?.text?.toString() ?: ""
-            Log.i("SearchActivity", "search button clicked, query='$q'")
-            if (SessionManager.host.isNullOrEmpty()) {
-                vm.error.postValue("No server configured. Please set server in settings.")
-                return@performSearch
-            }
-            try {
-                vm.search(q)
-            } catch (t: Throwable) {
-                vm.error.postValue(t.message ?: "Search failed")
-            }
+    activeQualityFilters.clear()
+    chipLossless.isChecked = false
+    chipHiRes.isChecked = false
+    chipAtmos.isChecked = false
+    
+    val q = queryInput?.text?.toString() ?: ""
+    Log.i("SearchActivity", "search button clicked, query='$q'")
+    
+    // ✅ REMOVED: No longer checking SessionManager.host since we use proxy servers
+    // if (SessionManager.host.isNullOrEmpty()) {
+    //     vm.error.postValue("No server configured. Please set server in settings.")
+    //     return@performSearch
+    // }
+    
+    try {
+        vm.search(q)
+    } catch (t: Throwable) {
+        vm.error.postValue(t.message ?: "Search failed")
+    }
 
-            // Hide keyboard
-            val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
-            imm?.hideSoftInputFromWindow(queryInput?.windowToken, 0)
-        }
+    // Hide keyboard
+    val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+    imm?.hideSoftInputFromWindow(queryInput?.windowToken, 0)
+}
 
         searchButton?.setOnClickListener { performSearch() }
 
@@ -312,18 +342,29 @@ class SearchActivity : ComponentActivity() {
         AudioPlayer.currentTitle.observe(this) { t -> miniTitle?.text = t ?: "" }
         AudioPlayer.currentArtist.observe(this) { a -> miniArtist?.text = a ?: "" }
         AudioPlayer.currentAlbumArt.observe(this) { artUrl ->
-            if (artUrl.isNullOrBlank()) {
-                miniArt?.setImageResource(R.drawable.ic_album)
-            } else {
-                miniArt?.load(artUrl) { placeholder(R.drawable.ic_album); crossfade(true) }
-            }
+    val loadUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(artUrl)
+    if (loadUrl.isNullOrBlank()) {
+        miniArt?.setImageResource(R.drawable.ic_album)
+    } else {
+        miniArt?.load(loadUrl) { 
+            placeholder(R.drawable.ic_album)
+            error(R.drawable.ic_album)
+            crossfade(true) 
         }
+    }
+}
         AudioPlayer.isPlaying.observe(this) { playing ->
-            val res = if (playing == true) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-            miniPlay?.setImageResource(res)
-        }
+    val res = if (playing == true) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+    miniPlay?.setImageResource(res)
+}
 
-        miniPlay?.setOnClickListener { AudioPlayer.togglePlayPause() }
+val miniLoading = findViewById<ProgressBar>(R.id.miniplayerLoading)
+AudioPlayer.playbackState.observe(this) { state ->
+    val isBuffering = state == Player.STATE_BUFFERING
+    miniLoading?.visibility = if (isBuffering) View.VISIBLE else View.GONE
+}
+
+miniPlay?.setOnClickListener { AudioPlayer.togglePlayPause() }
 
         val miniRoot = findViewById<View?>(R.id.miniplayerRoot)
         miniRoot?.setOnClickListener {
@@ -347,38 +388,78 @@ class SearchActivity : ComponentActivity() {
             updateUIState()
         }
         
-        // Songs
-        vm.songs.observe(this) { list ->
-            // Attempt to map album names to album IDs using current album list for better cover lookups
-            val albumsForMatch = vm.albums.value ?: emptyList()
-            val updated = list.map { t ->
-                if (t.albumId.isNullOrBlank() && !t.albumName.isNullOrBlank()) {
-                    val match = albumsForMatch.firstOrNull { a -> a.name.equals(t.albumName, ignoreCase = true) }
-                    if (match != null) {
-                        t.copy(albumId = match.id, coverArtId = t.coverArtId ?: match.coverArtId)
-                    } else t
-                } else t
+       // FIXED SONG FILTERING WITH MULTI-SELECT QUALITY
+vm.songs.observe(this) { list ->
+    Log.d("FILTER_DEBUG", "Original song count: ${list.size}")
+    Log.d("FILTER_DEBUG", "Active quality filters: $activeQualityFilters")
+    
+    val albumsForMatch = vm.albums.value ?: emptyList()
+    
+    // 🔥 CORRECTED FILTERING LOGIC
+    val filtered = if (activeQualityFilters.isEmpty()) {
+        list
+    } else {
+        list.filter { track ->
+            var match = false
+            
+            // ATMOS check - look for "DOLBY_ATMOS" in audioModes OR mediaMetadata.tags
+            if (activeQualityFilters.contains("ATMOS")) {
+                if (track.audioModes?.any { it.contains("DOLBY_ATMOS", ignoreCase = true) } == true) match = true
             }
-            songsSection?.visibility = if (updated.isEmpty()) View.GONE else View.VISIBLE
-            currentSearchSongs = updated
-            trackAdapter.update(updated)
-            updateUIState()
+            
+            // HIRES check - look for "HIRES_LOSSLESS" (NOT "HIRES")
+            if (activeQualityFilters.contains("HIRES")) {
+                if (track.audioModes?.any { it.contains("HIRES_LOSSLESS", ignoreCase = true) } == true) match = true
+            }
+            
+            // LOSSLESS check - look for "LOSSLESS" in audioQuality OR tags
+            if (activeQualityFilters.contains("LOSSLESS")) {
+                if (track.audioQuality?.contains("LOSSLESS", ignoreCase = true) == true) match = true
+                if (track.audioModes?.any { it.contains("LOSSLESS", ignoreCase = true) } == true) match = true
+            }
+            
+            match
         }
+    }
+    
+    Log.d("FILTER_DEBUG", "Filtered song count: ${filtered.size}")
+    
+    // Match albums for missing IDs
+    val updated = filtered.map { t ->
+        if (t.albumId.isNullOrBlank() && !t.albumName.isNullOrBlank()) {
+            val match = albumsForMatch.firstOrNull { a -> 
+                a.name.equals(t.albumName, ignoreCase = true) 
+            }
+            if (match != null) {
+                t.copy(albumId = match.id, coverArtId = t.coverArtId ?: match.coverArtId)
+            } else t
+        } else t
+    }
+    
+    songsSection?.visibility = if (updated.isEmpty()) View.GONE else View.VISIBLE
+    currentSearchSongs = updated
+    trackAdapter.update(updated)
+    updateUIState()
+}
         
 
         // Error handling
         vm.error.observe(this) { err ->
-            if (!err.isNullOrEmpty()) {
-                errorCard?.visibility = View.VISIBLE
-                if (errorText != null) errorText.text = err
-                emptyState?.visibility = View.GONE
-                noResultsState?.visibility = View.GONE
-            } else {
-                errorCard?.visibility = View.GONE
-            }
+    if (!err.isNullOrEmpty()) {
+        errorCard?.visibility = View.VISIBLE
+        
+        // Show the full error message for debugging
+        // You can make this user-friendly later if needed
+        if (errorText != null) errorText.text = err
+        
+        emptyState?.visibility = View.GONE
+        noResultsState?.visibility = View.GONE
+    } else {
+        errorCard?.visibility = View.GONE
+    }
 
-            updateUIState()
-        }
+    updateUIState()
+}
 
         // Handle intent-driven initial query/filter
         val initialQuery = intent.getStringExtra("query")

@@ -49,15 +49,24 @@ class ArtistActivity : ComponentActivity() {
         albumsRecycler?.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this, androidx.recyclerview.widget.LinearLayoutManager.HORIZONTAL, false)
         albumsRecycler?.adapter = albumAdapter
 
-        // Popular songs (randomized list)
-        val popularSongsRecycler = findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.popularSongsRecycler)
-        val trackAdapter = com.example.moniq.adapters.TrackAdapter(emptyList(), onPlay = { t, pos -> AudioPlayer.playTrack(this, t.id, t.title, t.artist, t.coverArtId) }, onDownload = { /* no-op */ })
-        popularSongsRecycler?.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
-        popularSongsRecycler?.adapter = trackAdapter
+        // Store all tracks for filtering (DECLARE FIRST!)
+var allTracks = listOf<com.example.moniq.model.Track>()
+var isSearchLoading = false
 
-        // Store all tracks for filtering
-        var allTracks = listOf<com.example.moniq.model.Track>()
-        var isSearchLoading = false
+// Popular songs (randomized list)
+val popularSongsRecycler = findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.popularSongsRecycler)
+val trackAdapter = com.example.moniq.adapters.TrackAdapter(emptyList(), onPlay = { t, pos -> 
+    AudioPlayer.initialize(this)
+    // Find the position in allTracks instead of using the filtered position
+    val actualPos = allTracks.indexOfFirst { it.id == t.id }
+    if (actualPos != -1 && allTracks.isNotEmpty()) {
+        AudioPlayer.setQueue(allTracks, actualPos)  // ✅ Use the track's actual position in allTracks
+    } else {
+        AudioPlayer.playTrack(this, t.id, t.title, t.artist, t.coverArtId)
+    }
+}, onDownload = { /* no-op */ })
+popularSongsRecycler?.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
+popularSongsRecycler?.adapter = trackAdapter
 
 // Wire up song search
 val songSearchInput = findViewById<com.google.android.material.textfield.TextInputEditText?>(R.id.artistSongSearch)
@@ -138,141 +147,95 @@ songSearchInput?.addTextChangedListener(object : android.text.TextWatcher {
         val rand = java.util.Random()
         val randomTracks = (0 until 6).map { i ->
             val title = sampleTitles[rand.nextInt(sampleTitles.size)]
-            com.example.moniq.model.Track(id = "rand_$i", title = title, artist = artistName, durationSec = 210, albumId = null, albumName = null, coverArtId = null)
+            com.example.moniq.model.Track(id = "rand_$i", title = title, artist = artistName, duration = 210, albumId = null, albumName = null, coverArtId = null)
         }
         trackAdapter.update(randomTracks)
         val artistArtView = findViewById<ImageView>(R.id.artistHeader)
 
-        // Determine artist cover id: prefer intent-provided cover id (from search), else fallback to artistId
-        val intentCoverId = intent.getStringExtra("artistCoverId")
-        val coverCandidate = if (!intentCoverId.isNullOrEmpty()) intentCoverId else artistId
+// Prefer coverId from repository, fallback to intent (search results)
+val intentCoverId = intent.getStringExtra("artistCoverId")
 
-        // Load artist image if available (use Uri builder to encode params)
-        val host = SessionManager.host
-        val user = SessionManager.username ?: ""
-        val pass = SessionManager.password ?: ""
-        if (host != null) {
-            val artistCover = android.net.Uri.parse(host).buildUpon()
-                .appendPath("rest")
-                .appendPath("getCoverArt.view")
-                .appendQueryParameter("id", coverCandidate)
-                .appendQueryParameter("u", user)
-                .appendQueryParameter("p", pass)
-                .build()
+lifecycleScope.launch {
+    try {
+        val repo = ArtistRepository()
+        val info = repo.getArtistInfo(artistId)
+        // info: Triple<name, biography, coverId>
+        val repoName = info.first
+        val repoBio = info.second
+        val repoCoverId = info.third
 
-            lifecycleScope.launch {
-                val bytes = com.example.moniq.network.ImageFetcher.fetchUrlBytes(artistCover.toString())
-                if (bytes != null) {
-                    artistArtView.load(bytes) {
-                        crossfade(true)
-                        placeholder(android.R.drawable.ic_menu_report_image)
-                        error(android.R.drawable.ic_menu_report_image)
-                    }
+        // Biography
+        bioView.text = repoBio ?: "No biography available"
+
+        // Decide final cover id
+        val finalCoverId = repoCoverId ?: intentCoverId
+
+        // Load artist image using ImageUrlHelper (same as adapters)
+if (!finalCoverId.isNullOrEmpty()) {
+    val imageUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(finalCoverId)
+    if (!imageUrl.isNullOrEmpty()) {
+        artistArtView.load(imageUrl) {
+            crossfade(true)
+            placeholder(android.R.drawable.ic_menu_report_image)
+            error(android.R.drawable.ic_menu_report_image)
+            listener(
+                onSuccess = { _, result ->
                     try {
-                        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                        if (bmp != null) applyArtistPalette(bmp)
-                    } catch (_: Exception) {}
-                } else {
-                    artistArtView.setImageResource(android.R.drawable.ic_menu_report_image)
-                }
-            }
-        }
-
-       // Removed debug fetch info UI references
-var latestResponse: String? = null
-
-        lifecycleScope.launch {
-            try {
-                val repo = ArtistRepository()
-                val info = repo.getArtistInfo(artistId)
-                // info: Triple<name, biography, coverId>
-                val repoName = info.first
-                val repoBio = info.second
-                val repoCoverId = info.third
-                bioView.text = repoBio ?: "No biography available"
-            // If no intent-provided coverId, prefer the one from repo
-            if ((intentCoverId == null || intentCoverId.isEmpty()) && !repoCoverId.isNullOrEmpty()) {
-                lifecycleScope.launch {
-                    val host2 = SessionManager.host
-                    val user2 = SessionManager.username ?: ""
-                    val pass2 = SessionManager.password ?: ""
-                    if (host2 != null) {
-                        val artUri = android.net.Uri.parse(host2).buildUpon()
-                            .appendPath("rest")
-                            .appendPath("getCoverArt.view")
-                            .appendQueryParameter("id", repoCoverId)
-                            .appendQueryParameter("u", user2)
-                            .appendQueryParameter("p", pass2)
-                            .build()
-                        val bytes = com.example.moniq.network.ImageFetcher.fetchUrlBytes(artUri.toString())
-                        if (bytes != null) {
-                            artistArtView.load(bytes) {
-                                crossfade(true)
-                                placeholder(android.R.drawable.ic_menu_report_image)
-                                error(android.R.drawable.ic_menu_report_image)
-                            }
-                            try {
-                                val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                                if (bmp != null) applyArtistPalette(bmp)
-                            } catch (_: Exception) {}
+                        val drawable = result.drawable
+                        if (drawable is android.graphics.drawable.BitmapDrawable) {
+                            val bmp = drawable.bitmap
+                            if (bmp != null) applyArtistPalette(bmp)
                         }
-                    }
+                    } catch (_: Exception) {}
                 }
-            }
-
-                // Also fetch raw response for artistInfo so we can inspect it in UI
-                try {
-                    val host = SessionManager.host
-                    val base = run {
-                        var b = host?.trim() ?: ""
-                        if (b.isNotBlank() && !b.startsWith("http://") && !b.startsWith("https://")) b = "https://$b"
-                        if (b.isNotBlank() && !b.endsWith("/")) b += "/"
-                        b
-                    }
-                    if (base.isNotBlank()) {
-                        val retrofit = com.example.moniq.network.RetrofitClient.create(base)
-                        val api = retrofit.create(com.example.moniq.network.OpenSubsonicApi::class.java)
-                        val pwParam = if (SessionManager.legacy) SessionManager.password ?: "" else com.example.moniq.util.Crypto.md5(SessionManager.password ?: "")
-                        val resp = api.getArtistInfo(SessionManager.username ?: "", pwParam, artistId)
-                        latestResponse = resp.body() ?: ""
-// Debug fetch info UI removed
-                    }
-                } catch (_: Throwable) {}
-
-                val albums: List<Album> = repo.getArtistAlbums(artistId)
-                albumAdapter.update(albums)
-
-               // Pick random albums and fetch tracks from them to show as "Popular songs"
-try {
-    val musicRepo = com.example.moniq.music.MusicRepository()
-    val candidates = albums.shuffled().take(8)
-    val tempTracks = mutableListOf<com.example.moniq.model.Track>()
-    for (alb in candidates) {
-        try {
-            val t = musicRepo.getAlbumTracks(alb.id)
-            val byArtist = t.filter { tr ->
-                try {
-                    val an = artistName.lowercase().trim()
-                    val ta = (tr.artist ?: "").lowercase().trim()
-                    ta.contains(an) || an.contains(ta)
-                } catch (_: Exception) { false }
-            }
-            if (byArtist.isNotEmpty()) tempTracks.addAll(byArtist) else tempTracks.addAll(t)
-        } catch (_: Throwable) {}
-    }
-    allTracks = tempTracks.distinctBy { it.id }.shuffled()
-    val picks = allTracks.take(20)
-    trackAdapter.update(picks)
-} catch (_: Throwable) {
-    // network failures are non-fatal; leave the randomized list empty
-}
-            } catch (t: Throwable) {
-                android.util.Log.w("ArtistActivity", "Failed to load artist details", t)
-                bioView.text = "Failed to load biography"
-                albumAdapter.update(emptyList())
-            }
-           // View response button removed
+            )
         }
+    } else {
+        artistArtView.setImageResource(android.R.drawable.ic_menu_report_image)
+    }
+} else {
+    artistArtView.setImageResource(android.R.drawable.ic_menu_report_image)
+}
+
+        // Albums
+        val albums: List<Album> = repo.getArtistAlbums(artistId)
+        albumAdapter.update(albums)
+
+        // Popular songs (randomized)
+        try {
+            val musicRepo = com.example.moniq.music.MusicRepository()
+            val candidates = albums.shuffled().take(8)
+            val tempTracks = mutableListOf<com.example.moniq.model.Track>()
+
+            for (alb in candidates) {
+                try {
+                    val tracks = musicRepo.getAlbumTracks(alb.id)
+                    val byArtist = tracks.filter { tr ->
+                        try {
+                            val an = artistName.lowercase().trim()
+                            val ta = (tr.artist ?: "").lowercase().trim()
+                            ta.contains(an) || an.contains(ta)
+                        } catch (_: Exception) { false }
+                    }
+                    if (byArtist.isNotEmpty()) tempTracks.addAll(byArtist)
+                    else tempTracks.addAll(tracks)
+                } catch (_: Throwable) {}
+            }
+
+            allTracks = tempTracks.distinctBy { it.id }.shuffled()
+            trackAdapter.update(allTracks.take(20))
+        } catch (_: Throwable) {
+            // non-fatal
+        }
+
+    } catch (t: Throwable) {
+        android.util.Log.w("ArtistActivity", "Failed to load artist details", t)
+        bioView.text = "Failed to load biography"
+        albumAdapter.update(emptyList())
+        artistArtView.setImageResource(android.R.drawable.ic_menu_report_image)
+    }
+}
+
 
         // Miniplayer wiring
         AudioPlayer.initialize(this)
@@ -284,12 +247,17 @@ try {
         AudioPlayer.currentTitle.observe(this) { t -> miniTitle?.text = t ?: "" }
         AudioPlayer.currentArtist.observe(this) { a -> miniArtist?.text = a ?: "" }
         AudioPlayer.currentAlbumArt.observe(this) { artUrl ->
-            if (artUrl.isNullOrBlank()) {
-                miniArt?.setImageResource(R.drawable.ic_album)
-            } else {
-                miniArt?.load(artUrl) { placeholder(R.drawable.ic_album); crossfade(true) }
-            }
+    val loadUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(artUrl)
+    if (loadUrl.isNullOrBlank()) {
+        miniArt?.setImageResource(R.drawable.ic_album)
+    } else {
+        miniArt?.load(loadUrl) { 
+            placeholder(R.drawable.ic_album)
+            error(R.drawable.ic_album)
+            crossfade(true) 
         }
+    }
+}
         AudioPlayer.isPlaying.observe(this) { playing ->
             val res = if (playing == true) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
             miniPlay?.setImageResource(res)
@@ -308,19 +276,59 @@ try {
 
     private fun applyArtistPalette(bmp: android.graphics.Bitmap) {
     try {
-        val defaultColor = resources.getColor(com.example.moniq.R.color.purple_500, theme)
-        val dominant = Palette.from(bmp).generate().getDominantColor(defaultColor)
-        val collapsing = findViewById<com.google.android.material.appbar.CollapsingToolbarLayout>(R.id.collapsingToolbar)
-        collapsing?.setContentScrimColor(dominant)
-        val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar)
-        toolbar?.setBackgroundColor(dominant)
+        val palette = Palette.from(bmp).generate()
         
-        // Apply to search bar
+        // Try to get the best color in order of preference
+        val dominantColor = palette.vibrantSwatch?.rgb 
+            ?: palette.darkVibrantSwatch?.rgb 
+            ?: palette.lightVibrantSwatch?.rgb
+            ?: palette.mutedSwatch?.rgb
+            ?: palette.darkMutedSwatch?.rgb
+            ?: palette.getDominantColor(resources.getColor(com.example.moniq.R.color.purple_500, theme))
+        
+        // Apply to collapsing toolbar
+        val collapsing = findViewById<com.google.android.material.appbar.CollapsingToolbarLayout>(R.id.collapsingToolbar)
+        collapsing?.setContentScrimColor(dominantColor)
+        collapsing?.setStatusBarScrimColor(dominantColor)
+        
+        // Apply to toolbar
+        val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar)
+        toolbar?.setBackgroundColor(dominantColor)
+        
+        // Apply to AppBarLayout
+        val appBar = findViewById<com.google.android.material.appbar.AppBarLayout>(R.id.appBarLayout)
+        appBar?.setBackgroundColor(dominantColor)
+        
+        // Apply to search bar with better contrast
         val searchLayout = findViewById<com.google.android.material.textfield.TextInputLayout?>(R.id.artistSongSearchLayout)
-        searchLayout?.boxStrokeColor = dominant
+        searchLayout?.boxStrokeColor = dominantColor
         searchLayout?.hintTextColor = android.content.res.ColorStateList.valueOf(android.graphics.Color.WHITE)
+        searchLayout?.setBoxBackgroundColorStateList(
+            android.content.res.ColorStateList.valueOf(
+                android.graphics.Color.argb(30, 
+                    android.graphics.Color.red(dominantColor),
+                    android.graphics.Color.green(dominantColor),
+                    android.graphics.Color.blue(dominantColor)
+                )
+            )
+        )
+        
         val searchInput = findViewById<com.google.android.material.textfield.TextInputEditText?>(R.id.artistSongSearch)
         searchInput?.setTextColor(android.graphics.Color.WHITE)
-    } catch (_: Exception) {}
+        
+        // Update status bar color to match
+        window.statusBarColor = darkenColor(dominantColor, 0.7f)
+        
+    } catch (e: Exception) {
+        android.util.Log.e("ArtistActivity", "Failed to apply palette", e)
+    }
+}
+
+// Helper function to darken colors
+private fun darkenColor(color: Int, factor: Float): Int {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(color, hsv)
+    hsv[2] *= factor // Darken the value
+    return android.graphics.Color.HSVToColor(hsv)
 }
 }

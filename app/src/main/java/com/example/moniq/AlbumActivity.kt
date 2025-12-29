@@ -1,24 +1,20 @@
 package com.example.moniq
 
+import com.example.moniq.util.MetadataFetcher
+import com.example.moniq.util.ImageUrlHelper
 import android.os.Bundle
 import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
-import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.ImageView
 import android.widget.ImageButton
 import androidx.activity.ComponentActivity
-import androidx.core.view.setPadding
 import androidx.lifecycle.lifecycleScope
 import com.example.moniq.music.MusicRepository
 import com.example.moniq.model.Track
 import kotlinx.coroutines.launch
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.card.MaterialCardView
 import android.graphics.BitmapFactory
 import coil.load
-import coil.transform.RoundedCornersTransformation
 import androidx.palette.graphics.Palette
 import com.google.android.material.appbar.CollapsingToolbarLayout
 import com.example.moniq.player.AudioPlayer
@@ -27,7 +23,9 @@ import kotlinx.coroutines.withContext
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Scale
-import com.example.moniq.util.MetadataFetcher
+import android.util.Log
+import com.example.moniq.util.ServerManager
+
 
 class AlbumActivity : ComponentActivity() {
     private var albumArtLoaded = false
@@ -43,169 +41,150 @@ class AlbumActivity : ComponentActivity() {
         findViewById<TextView>(R.id.albumTitle).text = albumTitle
         findViewById<TextView>(R.id.albumArtist).text = albumArtist
 
-        // Show placeholder immediately
         val albumArtView = findViewById<ImageView>(R.id.albumHeader)
         albumArtView.setImageResource(R.drawable.ic_album)
 
         val tracksRecycler = findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.tracksRecycler)
         var currentTracks: List<Track> = emptyList()
-        val trackAdapter = com.example.moniq.adapters.TrackAdapter(emptyList(), onPlay = { track, pos ->
-    AudioPlayer.initialize(this@AlbumActivity)
-    if (currentTracks.isNotEmpty()) {
-        val tracksWithAlbum = currentTracks.map { it.copy(albumId = albumId, albumName = albumTitle) }
-        AudioPlayer.setQueue(tracksWithAlbum, pos)
-    } else {
-        lifecycleScope.launch {
-            val repo = MusicRepository()
-            val tracks: List<Track> = repo.getAlbumTracks(albumId)
-            currentTracks = tracks
-            val tracksWithAlbum = tracks.map { it.copy(albumId = albumId, albumName = albumTitle) }
-            AudioPlayer.setQueue(tracksWithAlbum, pos)
-        }
-    }
-}, onDownload = { track ->
-            lifecycleScope.launch {
-                val ok = com.example.moniq.player.DownloadManager.downloadTrack(
-                    this@AlbumActivity, track.id, track.title, track.artist, albumTitle, null
-                )
-                android.widget.Toast.makeText(
-                    this@AlbumActivity,
-                    if (ok) "Downloaded" else "Download failed",
-                    android.widget.Toast.LENGTH_LONG
-                ).show()
-            }
-        })
-        tracksRecycler?.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
-        tracksRecycler?.adapter = trackAdapter
-
-        // Load tracks and THEN load album art (avoid race condition)
-        lifecycleScope.launch {
-    val repo = MusicRepository()
-    val tracks: List<Track> = repo.getAlbumTracks(albumId)
-    // Enrich tracks with missing metadata
-    val enrichedTracks = MetadataFetcher.enrichTracksMetadata(tracks)
-    currentTracks = enrichedTracks
-    trackAdapter.update(enrichedTracks)
-    
-    // Extract quality info from first track
-    if (enrichedTracks.isNotEmpty()) {
-        val firstTrackId = enrichedTracks.first().id
-        try {
-            val host = SessionManager.host ?: return@launch
-            val username = SessionManager.username ?: ""
-            val password = SessionManager.password ?: ""
-            val legacy = SessionManager.legacy
-            val pwParam = if (legacy) password else com.example.moniq.util.Crypto.md5(password)
-            
-            var baseUrl = host.trim()
-            if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-                baseUrl = "https://$baseUrl"
-            }
-            if (!baseUrl.endsWith("/")) baseUrl += "/"
-            
-            val streamUrl = "${baseUrl}rest/stream.view?u=${java.net.URLEncoder.encode(username, "UTF-8")}&p=${java.net.URLEncoder.encode(pwParam, "UTF-8")}&id=${java.net.URLEncoder.encode(firstTrackId, "UTF-8")}&v=1.16.1&c=Moniq"
-            
-            val metadata = com.example.moniq.util.AudioMetadataExtractor.extractMetadata(streamUrl)
-
-if (metadata != null) {
-    val parts = mutableListOf<String>()
-    metadata.format?.let { format -> parts.add(format) }
-    metadata.bitrate?.let { bitrate -> parts.add("${bitrate} kbps") }
-    metadata.sampleRate?.let { sampleRate -> parts.add("${sampleRate / 1000} kHz") }
-    
-    val qualityText = parts.joinToString(" • ")
-    
-    // Update the album quality TextView
-    findViewById<TextView>(R.id.albumQuality)?.apply {
-        text = qualityText
-        visibility = android.view.View.VISIBLE
-    }
-}
-        } catch (e: Exception) {
-            android.util.Log.e("AlbumActivity", "Failed to extract quality", e)
-        }
-    }
-
-            // NOW load album art with proper cover ID from tracks
-            val coverIds = listOfNotNull(
-                enrichedTracks.firstOrNull()?.coverArtId,  // Try track's cover first
-                albumId,                             // Then album ID
-                enrichedTracks.firstOrNull()?.id            // Finally try first track's ID
-            ).distinct()
-
-            loadAlbumArtRobust(coverIds)
-
-            // Get the best album art URL for downloads
-            val albumArtUrl = buildCoverUrl(enrichedTracks.firstOrNull()?.coverArtId ?: albumId)
-
-            // Wire album download button
-            val downloadAlbumBtn = findViewById<MaterialButton>(R.id.downloadAlbumButton)
-            downloadAlbumBtn.setOnClickListener {
-                lifecycleScope.launch {
-                    val infos = enrichedTracks.mapIndexed { idx, tr ->
-                        com.example.moniq.player.DownloadManager.TrackInfo(
-                            tr.id, tr.title, tr.artist, albumTitle, albumArtUrl
-                        )
+        
+        val trackAdapter = com.example.moniq.adapters.TrackAdapter(
+            emptyList(), 
+            onPlay = { track, pos ->
+                AudioPlayer.initialize(this@AlbumActivity)
+                if (currentTracks.isNotEmpty()) {
+                    AudioPlayer.setQueue(currentTracks, pos)
+                } else {
+                    lifecycleScope.launch {
+                        val repo = MusicRepository()
+                        val tracks: List<Track> = repo.getAlbumTracks(albumId)
+                        currentTracks = tracks
+                        val tracksWithAlbum = tracks.map { it.copy(albumId = albumId, albumName = albumTitle) }
+                        AudioPlayer.setQueue(tracksWithAlbum, pos)
                     }
-                    val results = com.example.moniq.player.DownloadManager.downloadAlbum(
-                        this@AlbumActivity, infos
+                }
+            }, 
+            onDownload = { track ->
+                lifecycleScope.launch {
+                    val ok = com.example.moniq.player.DownloadManager.downloadTrack(
+                        this@AlbumActivity, track.id, track.title, track.artist, albumTitle, null
                     )
-                    val successCount = results.count { it.second }
                     android.widget.Toast.makeText(
                         this@AlbumActivity,
-                        "Downloaded $successCount of ${results.size} tracks",
+                        if (ok) "Downloaded" else "Download failed",
                         android.widget.Toast.LENGTH_LONG
                     ).show()
                 }
             }
+        )
+        
+        tracksRecycler?.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
+        tracksRecycler?.adapter = trackAdapter
 
-            val startDownload = intent.getBooleanExtra("startDownload", false)
-            if (startDownload) {
-                downloadAlbumBtn.performClick()
-            }
+      lifecycleScope.launch {
+    val repo = MusicRepository()
+    val tracks: List<Track> = repo.getAlbumTracks(albumId)
 
-            val addAll = intent.getBooleanExtra("addAllToPlaylist", false)
-            if (addAll) {
-                val pm = com.example.moniq.player.PlaylistManager(this@AlbumActivity.applicationContext)
-                val playlists = pm.list()
-                val names = playlists.map { it.name }.toMutableList()
-                names.add("Create new playlist...")
-                val items = names.map { it as CharSequence }.toTypedArray()
-                android.app.AlertDialog.Builder(this@AlbumActivity)
-                    .setTitle("Add album to playlist")
-                    .setItems(items) { _, idx ->
-                        if (idx == playlists.size) {
-                            val edit = android.widget.EditText(this@AlbumActivity)
-                            android.app.AlertDialog.Builder(this@AlbumActivity)
-                                .setTitle("New playlist")
-                                .setView(edit)
-                                .setPositiveButton("Create") { _, _ ->
-                                    val name = edit.text.toString().trim()
-                                    if (name.isNotEmpty()) {
-                                        val p = pm.create(name)
-                                        for (tr in enrichedTracks) pm.addTrack(p.id, tr)
-                                        android.widget.Toast.makeText(this@AlbumActivity, "Added ${enrichedTracks.size} tracks to $name", android.widget.Toast.LENGTH_LONG).show()
-                                    }
-                                }
-                                .setNegativeButton("Cancel", null)
-                                .show()
-                        } else {
-                            val p = playlists[idx]
-                            for (tr in enrichedTracks) pm.addTrack(p.id, tr)
-                            android.widget.Toast.makeText(this@AlbumActivity, "Added ${enrichedTracks.size} tracks to ${p.name}", android.widget.Toast.LENGTH_LONG).show()
-                        }
-                    }
-                    .show()
-            }
+    // ✅ NO enrichment needed - data is already complete!
+    val tracksWithAlbum = tracks.map { track ->
+        track.copy(
+            albumId = albumId,
+            albumName = albumTitle,
+            coverArtId = track.coverArtId ?: albumId  // Fallback to albumId
+        )
+    }
 
-            val playAllBtn = findViewById<MaterialButton>(R.id.playAllButton)
-playAllBtn.setOnClickListener {
-    if (enrichedTracks.isNotEmpty()) {
-        val tracksWithAlbum = enrichedTracks.map { it.copy(albumId = albumId, albumName = albumTitle) }
-        AudioPlayer.setQueue(tracksWithAlbum, 0)
+    currentTracks = tracksWithAlbum
+    trackAdapter.update(tracksWithAlbum)
+
+    // Display audio quality - check ALL tracks for highest quality
+if (tracksWithAlbum.isNotEmpty()) {
+    val qualityParts = mutableListOf<String>()
+
+    // ✅ Find the highest quality across all tracks
+    val hasHiRes = tracksWithAlbum.any { track ->
+        track.audioQuality == "HI_RES_LOSSLESS" || 
+        track.audioQuality == "HI_RES" ||
+        track.mediaMetadataTags?.contains("HIRES_LOSSLESS") == true ||
+        track.mediaMetadataTags?.contains("HI_RES_LOSSLESS") == true
+    }
+    
+    val hasLossless = tracksWithAlbum.any { track ->
+        track.audioQuality == "LOSSLESS" ||
+        track.mediaMetadataTags?.contains("LOSSLESS") == true
+    }
+
+    // Display highest quality found
+    when {
+        hasHiRes -> qualityParts.add("Hi-Res Lossless")
+        hasLossless -> qualityParts.add("Lossless")
+        else -> qualityParts.add("High Quality")
+    }
+
+    // Add Dolby Atmos if ANY track has it
+    if (tracksWithAlbum.any { it.audioModes?.contains("DOLBY_ATMOS") == true }) {
+        qualityParts.add("Dolby Atmos")
+    }
+
+    val qualityText = qualityParts.joinToString(" • ")
+
+    findViewById<TextView>(R.id.albumQuality)?.apply {
+        text = qualityText
+        visibility = View.VISIBLE
     }
 }
+
+    // ✅ Load album art (simpler - just use first valid ID)
+    val coverArtId = tracksWithAlbum.firstOrNull()?.coverArtId ?: albumId
+    loadAlbumArt(coverArtId)
+
+    val albumArtUrl = ImageUrlHelper.getCoverArtUrl(coverArtId)
+
+    // Setup download button
+    findViewById<MaterialButton>(R.id.downloadAlbumButton).setOnClickListener {
+        lifecycleScope.launch {
+            // ✅ Use first working server for ALL tracks (faster)
+            val workingServer = findFirstWorkingServer(tracksWithAlbum.first().id)
+            
+            if (workingServer == null) {
+                android.widget.Toast.makeText(
+                    this@AlbumActivity,
+                    "No servers available",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+                return@launch
+            }
+
+            val infos = tracksWithAlbum.map { tr ->
+                com.example.moniq.player.DownloadManager.TrackInfo(
+                    tr.id,
+                    tr.title,
+                    tr.artist,
+                    albumTitle,
+                    albumArtUrl,
+                    "$workingServer/stream/?id=${tr.id}"  // Same server for all
+                )
+            }
+
+            val results = com.example.moniq.player.DownloadManager.downloadAlbum(
+                this@AlbumActivity,
+                infos
+            )
+
+            val successCount = results.count { it.second }
+            android.widget.Toast.makeText(
+                this@AlbumActivity,
+                "Downloaded $successCount of ${results.size} tracks",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
         }
+    }
+
+    findViewById<MaterialButton>(R.id.playAllButton).setOnClickListener {
+        if (tracksWithAlbum.isNotEmpty()) {
+            AudioPlayer.setQueue(tracksWithAlbum, 0)
+        }
+    }
+}
 
         // Miniplayer wiring
         AudioPlayer.initialize(this)
@@ -217,16 +196,18 @@ playAllBtn.setOnClickListener {
         AudioPlayer.currentTitle.observe(this) { t -> miniTitle?.text = t ?: "" }
         AudioPlayer.currentArtist.observe(this) { a -> miniArtist?.text = a ?: "" }
         AudioPlayer.currentAlbumArt.observe(this) { artUrl ->
-            if (artUrl.isNullOrBlank()) {
+            val loadUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(artUrl)
+            if (loadUrl.isNullOrBlank()) {
                 miniArt?.setImageResource(R.drawable.ic_album)
             } else {
-                miniArt?.load(artUrl) { 
+                miniArt?.load(loadUrl) { 
                     placeholder(R.drawable.ic_album)
                     error(R.drawable.ic_album)
-                    crossfade(true)
+                    crossfade(true) 
                 }
             }
         }
+        
         AudioPlayer.isPlaying.observe(this) { playing ->
             val res = if (playing == true) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
             miniPlay?.setImageResource(res)
@@ -243,60 +224,27 @@ playAllBtn.setOnClickListener {
         }
     }
 
-    private fun buildCoverUrl(coverId: String): String? {
-        return if (SessionManager.host != null) {
-            android.net.Uri.parse(SessionManager.host).buildUpon()
-                .appendPath("rest")
-                .appendPath("getCoverArt.view")
-                .appendQueryParameter("id", coverId)
-                .appendQueryParameter("u", SessionManager.username ?: "")
-                .appendQueryParameter("p", SessionManager.password ?: "")
-                .appendQueryParameter("size", "500")  // Request reasonable size
-                .build().toString()
-        } else null
+   private suspend fun loadAlbumArt(coverArtId: String) = withContext(Dispatchers.IO) {
+    if (albumArtLoaded) return@withContext
+    
+    val albumHeader = findViewById<ImageView>(R.id.albumHeader)
+    val coverUrl = ImageUrlHelper.getCoverArtUrl(coverArtId)
+    
+    if (coverUrl == null) {
+        withContext(Dispatchers.Main) { setDefaultAlbumArt() }
+        return@withContext
     }
-
-    private suspend fun loadAlbumArtRobust(coverIds: List<String>) = withContext(Dispatchers.IO) {
-        if (albumArtLoaded) return@withContext  // Prevent duplicate loads
-        
-        val host = SessionManager.host
-        if (host == null) {
-            withContext(Dispatchers.Main) { setDefaultAlbumArt() }
-            return@withContext
-        }
-
-        // Try each cover ID until one succeeds. Execute Coil requests synchronously
-        // so we only try the next ID after the previous one completes.
-        val albumHeader = findViewById<ImageView>(R.id.albumHeader)
-        val imageLoader = coil.ImageLoader(this@AlbumActivity)
-        for (coverId in coverIds) {
-            val coverUrl = buildCoverUrl(coverId) ?: continue
-            try {
-                val request = ImageRequest.Builder(this@AlbumActivity)
-                    .data(coverUrl)
-                    .allowHardware(false)
-                    .crossfade(true)
-                    .memoryCachePolicy(CachePolicy.ENABLED)
-                    .diskCachePolicy(CachePolicy.ENABLED)
-                    .networkCachePolicy(CachePolicy.ENABLED)
-                    .scale(Scale.FIT)
-                    .build()
-
-                val result = withContext(Dispatchers.IO) {
-                    try {
-                        imageLoader.execute(request)
-                    } catch (e: Exception) {
-                        null
-                    }
-                }
-
-                if (result is coil.request.SuccessResult) {
-                    withContext(Dispatchers.Main) {
-                        albumHeader.setImageDrawable(result.drawable)
-                        albumArtLoaded = true
-                    }
-
-                    // Extract palette colors using fetched bytes (best accuracy)
+    
+    withContext(Dispatchers.Main) {
+        albumHeader.load(coverUrl) {
+            crossfade(true)
+            placeholder(R.drawable.ic_album)
+            error(R.drawable.ic_album)
+            listener(
+                onSuccess = { _, result ->
+                    albumArtLoaded = true
+                    
+                    // Extract colors in background
                     lifecycleScope.launch(Dispatchers.IO) {
                         try {
                             val bytes = com.example.moniq.network.ImageFetcher.fetchUrlBytes(coverUrl)
@@ -313,22 +261,14 @@ playAllBtn.setOnClickListener {
                             e.printStackTrace()
                         }
                     }
-
-                    break
+                },
+                onError = { _, _ ->
+                    setDefaultAlbumArt()
                 }
-                // else try next coverId
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
-        // If nothing worked, set default
-        if (!albumArtLoaded) {
-            withContext(Dispatchers.Main) {
-                setDefaultAlbumArt()
-            }
+            )
         }
     }
+}
 
     private fun setDefaultAlbumArt() {
         val albumHeader = findViewById<ImageView>(R.id.albumHeader)
@@ -363,14 +303,12 @@ playAllBtn.setOnClickListener {
         }
     }
 
-    // Helper to apply dominant color to buttons in the album view
     private fun applyButtonTint(dominant: Int) {
         try {
             val downloadBtn = findViewById<com.google.android.material.button.MaterialButton>(R.id.downloadAlbumButton)
             val playAllBtn = findViewById<com.google.android.material.button.MaterialButton>(R.id.playAllButton)
             downloadBtn?.backgroundTintList = android.content.res.ColorStateList.valueOf(dominant)
             playAllBtn?.backgroundTintList = android.content.res.ColorStateList.valueOf(dominant)
-            // also tint icon if present
             downloadBtn?.iconTint = android.content.res.ColorStateList.valueOf(android.graphics.Color.WHITE)
         } catch (_: Exception) {}
     }
@@ -381,27 +319,32 @@ playAllBtn.setOnClickListener {
         return String.format("%d:%02d", m, s)
     }
 
-    // Add after the formatDuration method
-private suspend fun getTrackQuality(trackId: String): String? = withContext(Dispatchers.IO) {
-    try {
-        val host = SessionManager.host ?: return@withContext null
-        val username = SessionManager.username ?: ""
-        val password = SessionManager.password ?: ""
-        val legacy = SessionManager.legacy
-        val pwParam = if (legacy) password else com.example.moniq.util.Crypto.md5(password)
-        
-        var baseUrl = host.trim()
-        if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-            baseUrl = "https://$baseUrl"
+    private suspend fun findFirstWorkingServer(testTrackId: String): String? = withContext(Dispatchers.IO) {
+    val servers = ServerManager.getOrderedServers()
+    
+    for (server in servers) {
+        try {
+            val testUrl = "$server/track/?id=$testTrackId"
+            val conn = java.net.URL(testUrl).openConnection() as java.net.HttpURLConnection
+conn.connectTimeout = 3000
+conn.readTimeout = 3000
+conn.requestMethod = "GET"
+conn.setRequestProperty("Accept", "*/*")
+conn.setRequestProperty("Accept-Encoding", "gzip, deflate, br, zstd")
+conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0")
+conn.setRequestProperty("x-client", "BiniLossless/v3.3")  // 🔥 CRITICAL
+            
+            if (conn.responseCode == 200) {
+                conn.disconnect()
+                ServerManager.recordSuccess(server)
+                return@withContext server
+            }
+            conn.disconnect()
+        } catch (e: Exception) {
+            continue
         }
-        if (!baseUrl.endsWith("/")) baseUrl += "/"
-        
-        val streamUrl = "${baseUrl}rest/stream.view?u=${java.net.URLEncoder.encode(username, "UTF-8")}&p=${java.net.URLEncoder.encode(pwParam, "UTF-8")}&id=${java.net.URLEncoder.encode(trackId, "UTF-8")}&v=1.16.1&c=Moniq"
-        
-        val metadata = com.example.moniq.util.AudioMetadataExtractor.extractMetadata(streamUrl)
-        com.example.moniq.util.AudioMetadataExtractor.formatQuality(metadata)
-    } catch (e: Exception) {
-        null
     }
+    return@withContext null
+
 }
 }

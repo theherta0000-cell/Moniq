@@ -24,6 +24,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.widget.ProgressBar
+import androidx.media3.common.Player
+import android.view.Choreographer
+
 
 class FullscreenPlayerActivity : ComponentActivity() {
     companion object {
@@ -32,7 +36,7 @@ class FullscreenPlayerActivity : ComponentActivity() {
 
     private var lyricsLoadedFor: String? = null
     private var sliderJob: Job? = null
-    private var lyricsJob: Job? = null
+    private var lyricsChoreographer: Choreographer.FrameCallback? = null
     private var timeJob: Job? = null
     private var lyricsFetchJob: Job? = null
     private var showRomanization = true
@@ -179,7 +183,7 @@ class FullscreenPlayerActivity : ComponentActivity() {
                             runOnUiThread {
                                 try {
                                     val tv = android.widget.TextView(this@FullscreenPlayerActivity)
-                                    tv.text = "Attempted all backends\n\nError: ${e.message}"
+                                  tv.text = "Attempted all backends"
                                     tv.setPadding(24, 24, 24, 24)
                                     com.google.android.material.dialog.MaterialAlertDialogBuilder(
                                                     this@FullscreenPlayerActivity
@@ -478,6 +482,21 @@ class FullscreenPlayerActivity : ComponentActivity() {
                 }
                 true
             }
+
+            // Add this in onCreate() after the albumItem code (around line 145):
+
+val infoItem = toolbar.menu.add("Info")
+infoItem.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+infoItem.setIcon(android.R.drawable.ic_menu_info_details)
+infoItem.setOnMenuItemClickListener {
+    val trackId = AudioPlayer.currentTrackId
+    if (trackId.isNullOrBlank()) {
+        Toast.makeText(this, "No track selected", Toast.LENGTH_SHORT).show()
+    } else {
+        showTrackInfo(trackId)
+    }
+    true
+}
         } catch (_: Exception) {}
 
         // Setup landscape view artist/album buttons
@@ -559,116 +578,66 @@ class FullscreenPlayerActivity : ComponentActivity() {
 
         AudioPlayer.currentArtist.observe(this) { a -> artistView?.text = a ?: "" }
 
-// Add quality display observer
-val qualityView = findViewById<TextView>(R.id.full_quality)
-AudioPlayer.currentTitle.observe(this) { title ->
-    // Update quality info when track changes
-    lifecycleScope.launch {
-        val trackId = AudioPlayer.currentTrackId
-        if (trackId != null) {
-            qualityView?.text = "Analyzing..."
-            qualityView?.visibility = View.VISIBLE
-            
-            try {
-                // Build the stream URL
-                val host = SessionManager.host ?: return@launch
-                val username = SessionManager.username ?: ""
-                val password = SessionManager.password ?: ""
-                val legacy = SessionManager.legacy
-                val pwParam = if (legacy) password else com.example.moniq.util.Crypto.md5(password)
-                
-                var baseUrl = host.trim()
-                if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-                    baseUrl = "https://$baseUrl"
+// Add loading indicator observer
+val fullLoading = findViewById<ProgressBar>(R.id.fullLoading)
+AudioPlayer.playbackState.observe(this) { state ->
+    val isBuffering = state == Player.STATE_BUFFERING
+    fullLoading?.visibility = if (isBuffering) View.VISIBLE else View.GONE
+}
+
+// Add quality display observers
+AudioPlayer.currentTrackQuality.observe(this) { _ -> updateQualityDisplay() }
+AudioPlayer.currentBitDepth.observe(this) { _ -> updateQualityDisplay() }
+AudioPlayer.currentSampleRate.observe(this) { _ -> updateQualityDisplay() }
+
+// REPLACEMENT: use same behavior as SearchActivity (do NOT fall back to track id)
+AudioPlayer.currentAlbumArt.observe(this) { artUrl ->
+    android.util.Log.d("FullscreenPlayer", "currentAlbumArt observe: artUrl='$artUrl' currentTrackId='${AudioPlayer.currentTrackId}'")
+
+    // Only use the album art value provided by AudioPlayer (as SearchActivity does).
+    // Do NOT fall back to building a proxy URL from numeric track id.
+    val loadUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(artUrl)
+
+    android.util.Log.d("FullscreenPlayer", "getCoverArtUrl returned='$loadUrl' for artUrl='$artUrl'")
+
+    if (loadUrl.isNullOrBlank()) {
+        artView?.setImageResource(android.R.drawable.ic_menu_report_image)
+        android.util.Log.w("FullscreenPlayer", "No loadUrl (albumArt missing) -> showing placeholder")
+    } else {
+        artView?.load(loadUrl) {
+            crossfade(true)
+            placeholder(android.R.drawable.ic_menu_report_image)
+            error(android.R.drawable.ic_menu_report_image)
+            transformations(coil.transform.RoundedCornersTransformation(16f))
+            size(1024)
+            scale(coil.size.Scale.FILL)
+            listener(
+                onSuccess = { _, result ->
+                    android.util.Log.d("FullscreenPlayer", "Coil success loading cover")
+                    try {
+                        val dr = result.drawable
+                        val bmp = (dr as? BitmapDrawable)?.bitmap
+                        if (bmp != null) {
+                            val colors = extractDominantColors(bmp)
+                            gradientBackground?.setColors(colors)
+                            val primaryColor = colors.firstOrNull() ?: 0xFF6200EE.toInt()
+                            applyAccentColor(primaryColor, playPause, prevBtn, nextBtn, progressSlider, downloadBtn, queueBtn)
+                            val lyricsMiniArt = findViewById<ImageView>(R.id.lyrics_mini_art)
+                            lyricsMiniArt?.setImageBitmap(bmp)
+                        }
+                    } catch (_: Exception) {}
+                },
+                onError = { request, result ->
+                    // Coil v2 error listener gives an ImageResult containing a throwable — log it.
+                    android.util.Log.e("FullscreenPlayer", "Coil failed to load cover: request=${request?.data} error=${result.throwable?.message}", result.throwable)
                 }
-                if (!baseUrl.endsWith("/")) baseUrl += "/"
-                
-                val streamUrl = "${baseUrl}rest/stream.view?u=${java.net.URLEncoder.encode(username, "UTF-8")}&p=${java.net.URLEncoder.encode(pwParam, "UTF-8")}&id=${java.net.URLEncoder.encode(trackId, "UTF-8")}&v=1.16.1&c=Moniq"
-                
-                // Extract metadata from stream
-                val metadata = com.example.moniq.util.AudioMetadataExtractor.extractMetadata(streamUrl)
-                
-                if (metadata != null) {
-                    val parts = mutableListOf<String>()
-                    metadata.format?.let { parts.add(it) }
-                    metadata.bitrate?.let { parts.add("${it} kbps") }
-                    metadata.sampleRate?.let { parts.add("${it / 1000} kHz") }
-                    
-                    qualityView?.text = parts.joinToString(" • ")
-                    qualityView?.visibility = View.VISIBLE
-                } else {
-                    qualityView?.visibility = View.GONE
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("FullscreenPlayer", "Failed to get quality info", e)
-                qualityView?.visibility = View.GONE
-            }
-        } else {
-            qualityView?.visibility = View.GONE
+            )
         }
     }
 }
 
-AudioPlayer.currentAlbumArt.observe(this) { artUrl ->
-            val loadUrl =
-                    when {
-                        !artUrl.isNullOrBlank() -> artUrl
-                        !AudioPlayer.currentTrackId.isNullOrBlank() &&
-                                SessionManager.host != null ->
-                                android.net.Uri.parse(SessionManager.host)
-                                        .buildUpon()
-                                        .appendPath("rest")
-                                        .appendPath("getCoverArt.view")
-                                        .appendQueryParameter("id", AudioPlayer.currentTrackId)
-                                        .appendQueryParameter("u", SessionManager.username ?: "")
-                                        .appendQueryParameter("p", SessionManager.password ?: "")
-                                        .build()
-                                        .toString()
-                        else -> null
-                    }
-            if (loadUrl == null) {
-                artView?.setImageResource(android.R.drawable.ic_menu_report_image)
-            } else {
-                artView?.load(loadUrl) {
-                    crossfade(true)
-                    placeholder(android.R.drawable.ic_menu_report_image)
-                    error(android.R.drawable.ic_menu_report_image)
-                    transformations(coil.transform.RoundedCornersTransformation(16f))
-                    size(1024)
-                    scale(coil.size.Scale.FILL)
-                    listener(
-                            onSuccess = { _, result ->
-                                try {
-                                    val dr = result.drawable
-                                    val bmp =
-                                            (dr as? BitmapDrawable)?.bitmap
-                                                    ?: (result.drawable.let { (it as? BitmapDrawable)?.bitmap })
-                                    if (bmp != null) {
-                                        val colors = extractDominantColors(bmp)
-                                        gradientBackground?.setColors(colors)
-                                        val primaryColor =
-                                                colors.firstOrNull() ?: 0xFF6200EE.toInt()
-                                        applyAccentColor(
-                                                primaryColor,
-                                                playPause,
-                                                prevBtn,
-                                                nextBtn,
-                                                progressSlider,
-                                                downloadBtn,
-                                                queueBtn
-                                        )
 
-                                        // Update lyrics mini art
-                                        val lyricsMiniArt =
-                                                findViewById<ImageView>(R.id.lyrics_mini_art)
-                                        lyricsMiniArt?.setImageBitmap(bmp)
-                                    }
-                                } catch (_: Exception) {}
-                            }
-                    )
-                }
-            }
-        }
+
 
         AudioPlayer.currentTitle.observe(this) { title ->
             titleView?.text = title ?: ""
@@ -715,41 +684,120 @@ AudioPlayer.currentAlbumArt.observe(this) { artUrl ->
         val fullTotal = findViewById<TextView>(R.id.full_total_time)
 
         playPause.setOnClickListener { AudioPlayer.togglePlayPause() }
+
+
+        AudioPlayer.isPlaying.value?.let { wasPlaying ->
+    if (wasPlaying) {
+        // Already playing, just observe
+    } else {
+        // Check if there's a track loaded and not at the end
+        val dur = AudioPlayer.duration()
+        val pos = AudioPlayer.currentPosition()
+        if (dur > 0 && pos < dur - 1000) {
+            // Track is loaded but paused, clicking the button should work
+        }
+    }
+}
+
         prevBtn?.setOnClickListener { AudioPlayer.previous() }
         nextBtn?.setOnClickListener { AudioPlayer.next() }
 
         downloadBtn?.setOnClickListener {
-            val trackId = AudioPlayer.currentTrackId
-            val title = AudioPlayer.currentTitle.value
-            val artist = AudioPlayer.currentArtist.value
-            if (trackId == null) {
-                Toast.makeText(this, "No track selected to download", Toast.LENGTH_SHORT).show()
-            } else {
-                lifecycleScope.launch {
-                    Toast.makeText(
-                                    this@FullscreenPlayerActivity,
-                                    "Downloading...",
-                                    Toast.LENGTH_SHORT
-                            )
-                            .show()
-                    val ok =
-                            DownloadManager.downloadTrack(
-                                    this@FullscreenPlayerActivity,
-                                    trackId,
-                                    title,
-                                    artist,
-                                    null,
-                                    null
-                            )
-                    Toast.makeText(
-                                    this@FullscreenPlayerActivity,
-                                    if (ok) "Download complete" else "Download failed",
-                                    Toast.LENGTH_LONG
-                            )
-                            .show()
+    val trackId = AudioPlayer.currentTrackId
+    val title = AudioPlayer.currentTitle.value
+    val artist = AudioPlayer.currentArtist.value
+    val albumName = AudioPlayer.currentAlbumName.value
+    val albumArt = AudioPlayer.currentAlbumArt.value
+    
+    if (trackId == null) {
+        Toast.makeText(this, "No track selected to download", Toast.LENGTH_SHORT).show()
+    } else {
+        lifecycleScope.launch {
+            // Show progress dialog
+            val progressDialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(this@FullscreenPlayerActivity)
+                .setTitle("Downloading")
+                .setMessage("$title\n0%")
+                .setCancelable(false)
+                .create()
+            progressDialog.show()
+            
+            try {
+                // Find working stream URL using ServerManager
+                val streamUrl = withContext(Dispatchers.IO) {
+                    val servers = com.example.moniq.util.ServerManager.getOrderedServers()
+                    var workingUrl: String? = null
+                    
+                    for (server in servers) {
+                        try {
+                            val testUrl = "$server/track/?id=$trackId"
+                            val conn = java.net.URL(testUrl).openConnection() as java.net.HttpURLConnection
+                            conn.connectTimeout = 3000
+                            conn.readTimeout = 3000
+                            conn.requestMethod = "GET"
+                            
+                            if (conn.responseCode == 200) {
+                                conn.disconnect()
+                                workingUrl = "$server/stream/?id=$trackId"
+                                com.example.moniq.util.ServerManager.recordSuccess(server)
+                                break
+                            }
+                            conn.disconnect()
+                            com.example.moniq.util.ServerManager.recordFailure(server)
+                        } catch (e: Exception) {
+                            com.example.moniq.util.ServerManager.recordFailure(server)
+                            continue
+                        }
+                    }
+                    workingUrl
                 }
+                
+                if (streamUrl == null) {
+                    progressDialog.dismiss()
+                    Toast.makeText(
+                        this@FullscreenPlayerActivity,
+                        "No working server found",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
+                }
+                
+                val albumArtUrl = com.example.moniq.util.ImageUrlHelper.getCoverArtUrl(albumArt)
+                
+                val ok = DownloadManager.downloadTrackWithProgress(
+                    this@FullscreenPlayerActivity,
+                    trackId,
+                    title,
+                    artist,
+                    albumName,
+                    albumArtUrl,
+                    streamUrl = streamUrl
+                ) { progress ->
+                    runOnUiThread {
+                        if (progress >= 0) {
+                            progressDialog.setMessage("$title\n$progress%")
+                        } else {
+                            progressDialog.setMessage("$title\nDownloading...")
+                        }
+                    }
+                }
+                
+                progressDialog.dismiss()
+                Toast.makeText(
+                    this@FullscreenPlayerActivity,
+                    if (ok) "Download complete" else "Download failed",
+                    Toast.LENGTH_LONG
+                ).show()
+            } catch (e: Exception) {
+                progressDialog.dismiss()
+                Toast.makeText(
+                    this@FullscreenPlayerActivity,
+                    "Download failed: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
+    }
+}
 
         queueBtn?.setOnClickListener {
             val intent = android.content.Intent(this, QueueActivity::class.java)
@@ -836,6 +884,7 @@ fun setupLyricsToggles() {
     android.util.Log.d("FullscreenPlayer", "setupLyricsToggles: Setup complete")
 }
 
+
         // Toggle lyrics button - shows/hides lyrics mode
         toggleLyrics?.setOnClickListener {
             val checked = toggleLyrics.isChecked
@@ -887,51 +936,51 @@ fun setupLyricsToggles() {
         }
 
         sliderJob =
-                lifecycleScope.launch(Dispatchers.Main) {
-                    var userSeeking = false
-                    progressSlider?.addOnChangeListener { _, _, fromUser ->
-                        if (fromUser) userSeeking = true
-                    }
-                    progressSlider?.addOnSliderTouchListener(
-                            object : Slider.OnSliderTouchListener {
-                                override fun onStartTrackingTouch(slider: Slider) {
-                                    userSeeking = true
-                                }
-                                override fun onStopTrackingTouch(slider: Slider) {
-                                    userSeeking = false
-                                    val dur = AudioPlayer.duration()
-                                    if (dur > 0) {
-                                        val targetMs = (slider.value / 100f * dur).toLong()
-                                        AudioPlayer.seekTo(targetMs)
-                                    }
-                                }
-                            }
-                    )
-                    while (isActive) {
-                        try {
+        lifecycleScope.launch(Dispatchers.Main) {
+            var userSeeking = false
+            progressSlider?.addOnChangeListener { _, _, fromUser ->
+                if (fromUser) userSeeking = true
+            }
+            progressSlider?.addOnSliderTouchListener(
+                    object : Slider.OnSliderTouchListener {
+                        override fun onStartTrackingTouch(slider: Slider) {
+                            userSeeking = true
+                        }
+                        override fun onStopTrackingTouch(slider: Slider) {
+                            userSeeking = false
                             val dur = AudioPlayer.duration()
-                            val pos = AudioPlayer.currentPosition()
-                            if (!userSeeking && dur > 0) {
-                                val percent = (pos.toFloat() / dur.toFloat()) * 100f
-                                progressSlider?.value = percent
+                            if (dur > 0) {
+                                val targetMs = (slider.value / 100f * dur).toLong()
+                                AudioPlayer.seekTo(targetMs)
                             }
-                        } catch (_: Exception) {}
-                        delay(500)
+                        }
                     }
-                }
-
-        lyricsJob =
-                lifecycleScope.launch(Dispatchers.Main) {
-                    while (isActive) {
-                        try {
-                            val pos = AudioPlayer.currentPosition()
-                            lyricsUpdatePosition(lyricsView, pos)
-                        } catch (_: Exception) {}
-                        delay(100)
+            )
+            while (isActive) {
+                try {
+                    val dur = AudioPlayer.duration()
+                    val pos = AudioPlayer.currentPosition()
+                    if (!userSeeking && dur > 0) {
+                        val percent = (pos.toFloat() / dur.toFloat()) * 100f
+                        progressSlider?.value = percent.coerceIn(0f, 100f)  // ADD .coerceIn(0f, 100f)
                     }
-                }
+                } catch (_: Exception) {}
+                delay(500)
+            }
+        }
 
-        timeJob =
+
+lyricsChoreographer = object : Choreographer.FrameCallback {
+    override fun doFrame(frameTimeNanos: Long) {
+        try {
+            val pos = AudioPlayer.currentPosition()
+            lyricsUpdatePosition(lyricsView, pos)
+            Choreographer.getInstance().postFrameCallback(this)
+        } catch (_: Exception) {}
+    }
+}
+Choreographer.getInstance().postFrameCallback(lyricsChoreographer!!)
+timeJob =
                 lifecycleScope.launch(Dispatchers.Main) {
                     while (isActive) {
                         val dur = AudioPlayer.duration()
@@ -966,7 +1015,9 @@ fun setupLyricsToggles() {
             sliderJob?.cancel()
         } catch (_: Exception) {}
         try {
-            lyricsJob?.cancel()
+            lyricsChoreographer?.let {
+                Choreographer.getInstance().removeFrameCallback(it)
+            }
         } catch (_: Exception) {}
         try {
             timeJob?.cancel()
@@ -1007,115 +1058,111 @@ fun setupLyricsToggles() {
     }
 
     private fun lyricsSetShowTransliteration(view: View?, show: Boolean) {
-    android.util.Log.d("FullscreenPlayer", "lyricsSetShowTransliteration: view=$view, show=$show")
-    if (view == null) {
-        android.util.Log.w("FullscreenPlayer", "lyricsSetShowTransliteration: view is null!")
-        return
-    }
-    try {
-        val cls = Class.forName("com.example.moniq.views.LyricsView")
-        android.util.Log.d("FullscreenPlayer", "lyricsSetShowTransliteration: class loaded, isInstance=${cls.isInstance(view)}")
-        if (cls.isInstance(view)) {
-            val m = cls.getMethod("setShowTransliteration", Boolean::class.javaPrimitiveType)
-            android.util.Log.d("FullscreenPlayer", "lyricsSetShowTransliteration: method found, invoking with show=$show")
-            m.invoke(view, show)
-            android.util.Log.d("FullscreenPlayer", "lyricsSetShowTransliteration: method invoked successfully")
-        } else {
-            android.util.Log.w("FullscreenPlayer", "lyricsSetShowTransliteration: view is not an instance of LyricsView")
+        android.util.Log.d("FullscreenPlayer", "lyricsSetShowTransliteration: view=$view, show=$show")
+        if (view == null) {
+            android.util.Log.w("FullscreenPlayer", "lyricsSetShowTransliteration: view is null!")
+            return
         }
-    } catch (e: Exception) {
-        android.util.Log.e("FullscreenPlayer", "lyricsSetShowTransliteration: error", e)
+        try {
+            val cls = Class.forName("com.example.moniq.views.LyricsView")
+            android.util.Log.d("FullscreenPlayer", "lyricsSetShowTransliteration: class loaded, isInstance=${cls.isInstance(view)}")
+            if (cls.isInstance(view)) {
+                val m = cls.getMethod("setShowTransliteration", Boolean::class.javaPrimitiveType)
+                android.util.Log.d("FullscreenPlayer", "lyricsSetShowTransliteration: method found, invoking with show=$show")
+                m.invoke(view, show)
+                android.util.Log.d("FullscreenPlayer", "lyricsSetShowTransliteration: method invoked successfully")
+            } else {
+                android.util.Log.w("FullscreenPlayer", "lyricsSetShowTransliteration: view is not an instance of LyricsView")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("FullscreenPlayer", "lyricsSetShowTransliteration: error", e)
+        }
     }
-}
 
     private fun lyricsSetShowTranslation(view: View?, show: Boolean) {
-    android.util.Log.d("FullscreenPlayer", "lyricsSetShowTranslation: view=$view, show=$show")
-    if (view == null) {
-        android.util.Log.w("FullscreenPlayer", "lyricsSetShowTranslation: view is null!")
-        return
-    }
-    try {
-        val cls = Class.forName("com.example.moniq.views.LyricsView")
-        android.util.Log.d("FullscreenPlayer", "lyricsSetShowTranslation: class loaded, isInstance=${cls.isInstance(view)}")
-        if (cls.isInstance(view)) {
-            val m = cls.getMethod("setShowTranslation", Boolean::class.javaPrimitiveType)
-            android.util.Log.d("FullscreenPlayer", "lyricsSetShowTranslation: method found, invoking with show=$show")
-            m.invoke(view, show)
-            android.util.Log.d("FullscreenPlayer", "lyricsSetShowTranslation: method invoked successfully")
-        } else {
-            android.util.Log.w("FullscreenPlayer", "lyricsSetShowTranslation: view is not an instance of LyricsView")
-        }
-    } catch (e: Exception) {
-        android.util.Log.e("FullscreenPlayer", "lyricsSetShowTranslation: error", e)
-    }
-}
-
-private fun updateLyricsToggleButtonsVisibility(lyricsView: View?) {
-    try {
-        val toggleRomanization = findViewById<ImageButton>(R.id.lyrics_toggle_romanization)
-        val toggleTranslation = findViewById<ImageButton>(R.id.lyrics_toggle_translation)
-        
-        if (lyricsView == null) {
-            toggleRomanization?.visibility = View.GONE
-            toggleTranslation?.visibility = View.GONE
+        android.util.Log.d("FullscreenPlayer", "lyricsSetShowTranslation: view=$view, show=$show")
+        if (view == null) {
+            android.util.Log.w("FullscreenPlayer", "lyricsSetShowTranslation: view is null!")
             return
         }
-        
-        // Get the lyrics lines to check content
-        val cls = Class.forName("com.example.moniq.views.LyricsView")
-        if (!cls.isInstance(lyricsView)) {
-            toggleRomanization?.visibility = View.GONE
-            toggleTranslation?.visibility = View.GONE
-            return
-        }
-        
-        // Access the private 'lines' field via reflection
-        val linesField = cls.getDeclaredField("lines")
-        linesField.isAccessible = true
-        val lines = linesField.get(lyricsView) as? List<*>
-        
-        var hasRomanization = false
-        var hasTranslation = false
-        
-        if (lines != null) {
-            for (line in lines) {
-                if (line == null) continue
-                
-                val lineClass = line::class.java
-                
-                // Check transliteration field
-                try {
-                    val translitField = lineClass.getDeclaredField("transliteration")
-                    translitField.isAccessible = true
-                    val translit = translitField.get(line) as? String
-                    if (!translit.isNullOrBlank()) {
-                        hasRomanization = true
-                    }
-                } catch (_: Exception) {}
-                
-                // Check translation field
-                try {
-                    val translationField = lineClass.getDeclaredField("translation")
-                    translationField.isAccessible = true
-                    val translation = translationField.get(line) as? String
-                    if (!translation.isNullOrBlank()) {
-                        hasTranslation = true
-                    }
-                } catch (_: Exception) {}
-                
-                if (hasRomanization && hasTranslation) break
+        try {
+            val cls = Class.forName("com.example.moniq.views.LyricsView")
+            android.util.Log.d("FullscreenPlayer", "lyricsSetShowTranslation: class loaded, isInstance=${cls.isInstance(view)}")
+            if (cls.isInstance(view)) {
+                val m = cls.getMethod("setShowTranslation", Boolean::class.javaPrimitiveType)
+                android.util.Log.d("FullscreenPlayer", "lyricsSetShowTranslation: method found, invoking with show=$show")
+                m.invoke(view, show)
+                android.util.Log.d("FullscreenPlayer", "lyricsSetShowTranslation: method invoked successfully")
+            } else {
+                android.util.Log.w("FullscreenPlayer", "lyricsSetShowTranslation: view is not an instance of LyricsView")
             }
+        } catch (e: Exception) {
+            android.util.Log.e("FullscreenPlayer", "lyricsSetShowTranslation: error", e)
         }
-        
-        android.util.Log.d("FullscreenPlayer", "updateLyricsToggleButtonsVisibility: hasRomanization=$hasRomanization, hasTranslation=$hasTranslation")
-        
-        toggleRomanization?.visibility = if (hasRomanization) View.VISIBLE else View.GONE
-        toggleTranslation?.visibility = if (hasTranslation) View.VISIBLE else View.GONE
-        
-    } catch (e: Exception) {
-        android.util.Log.e("FullscreenPlayer", "updateLyricsToggleButtonsVisibility: error", e)
     }
-}
+
+    private fun updateLyricsToggleButtonsVisibility(lyricsView: View?) {
+        try {
+            val toggleRomanization = findViewById<ImageButton>(R.id.lyrics_toggle_romanization)
+            val toggleTranslation = findViewById<ImageButton>(R.id.lyrics_toggle_translation)
+            
+            if (lyricsView == null) {
+                toggleRomanization?.visibility = View.GONE
+                toggleTranslation?.visibility = View.GONE
+                return
+            }
+            
+            val cls = Class.forName("com.example.moniq.views.LyricsView")
+            if (!cls.isInstance(lyricsView)) {
+                toggleRomanization?.visibility = View.GONE
+                toggleTranslation?.visibility = View.GONE
+                return
+            }
+            
+            val linesField = cls.getDeclaredField("lines")
+            linesField.isAccessible = true
+            val lines = linesField.get(lyricsView) as? List<*>
+            
+            var hasRomanization = false
+            var hasTranslation = false
+            
+            if (lines != null) {
+                for (line in lines) {
+                    if (line == null) continue
+                    
+                    val lineClass = line::class.java
+                    
+                    try {
+                        val translitField = lineClass.getDeclaredField("transliteration")
+                        translitField.isAccessible = true
+                        val translit = translitField.get(line) as? String
+                        if (!translit.isNullOrBlank()) {
+                            hasRomanization = true
+                        }
+                    } catch (_: Exception) {}
+                    
+                    try {
+                        val translationField = lineClass.getDeclaredField("translation")
+                        translationField.isAccessible = true
+                        val translation = translationField.get(line) as? String
+                        if (!translation.isNullOrBlank()) {
+                            hasTranslation = true
+                        }
+                    } catch (_: Exception) {}
+                    
+                    if (hasRomanization && hasTranslation) break
+                }
+            }
+            
+            android.util.Log.d("FullscreenPlayer", "updateLyricsToggleButtonsVisibility: hasRomanization=$hasRomanization, hasTranslation=$hasTranslation")
+            
+            toggleRomanization?.visibility = if (hasRomanization) View.VISIBLE else View.GONE
+            toggleTranslation?.visibility = if (hasTranslation) View.VISIBLE else View.GONE
+            
+        } catch (e: Exception) {
+            android.util.Log.e("FullscreenPlayer", "updateLyricsToggleButtonsVisibility: error", e)
+        }
+    }
 
     private fun extractDominantColors(bmp: Bitmap): List<Int> {
         return try {
@@ -1127,7 +1174,6 @@ private fun updateLyricsToggleButtonsVisibility(lyricsView: View?) {
                 val alpha = (p shr 24) and 0xff
                 if (alpha < 128) continue
 
-                // Quantize color to reduce similar colors
                 val r = ((p shr 16) and 0xff) / 32 * 32
                 val g = ((p shr 8) and 0xff) / 32 * 32
                 val b = (p and 0xff) / 32 * 32
@@ -1136,7 +1182,6 @@ private fun updateLyricsToggleButtonsVisibility(lyricsView: View?) {
                 colorCounts[quantized] = (colorCounts[quantized] ?: 0) + 1
             }
 
-            // Get top 3 most common colors
             val sorted = colorCounts.entries.sortedByDescending { it.value }.take(3)
             sorted.map { it.key }
         } catch (_: Exception) {
@@ -1198,5 +1243,167 @@ private fun updateLyricsToggleButtonsVisibility(lyricsView: View?) {
         val m = sec / 60
         val s = sec % 60
         return String.format("%d:%02d", m, s)
+    }
+
+    private fun updateQualityDisplay() {
+        val qualityView = findViewById<TextView>(R.id.full_quality)
+        val quality = AudioPlayer.currentTrackQuality.value
+        val bitDepth = AudioPlayer.currentBitDepth.value
+        val sampleRate = AudioPlayer.currentSampleRate.value
+        
+        val parts = mutableListOf<String>()
+        
+        when (quality) {
+            "HI_RES_LOSSLESS", "HI_RES" -> parts.add("Hi-Res Lossless")
+            "LOSSLESS" -> parts.add("Lossless")
+            "HIGH" -> parts.add("High Quality")
+            "LOW" -> parts.add("Standard Quality")
+        }
+        
+        bitDepth?.let { parts.add("${it}-bit") }
+        
+        sampleRate?.let { 
+            val kHz = it / 1000
+            parts.add("${kHz} kHz")
+        }
+        
+        if (parts.isNotEmpty()) {
+            qualityView?.text = parts.joinToString(" • ")
+            qualityView?.visibility = View.VISIBLE
+        } else {
+            qualityView?.visibility = View.GONE
+        }
+    }
+
+    private fun showTrackInfo(trackId: String) {
+        val progressDialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle("Loading track info...")
+            .setView(ProgressBar(this).apply { 
+                isIndeterminate = true
+                setPadding(48, 48, 48, 48)
+            })
+            .setCancelable(false)
+            .create()
+        progressDialog.show()
+        
+        lifecycleScope.launch {
+            try {
+                val info = withContext(Dispatchers.IO) {
+                    com.example.moniq.util.TrackInfoFetcher.fetchTrackInfo(trackId)
+                }
+                
+                progressDialog.dismiss()
+                
+                if (info != null) {
+                    showTrackInfoDialog(info)
+                } else {
+                    Toast.makeText(this@FullscreenPlayerActivity, "Failed to load track info", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                progressDialog.dismiss()
+                Toast.makeText(this@FullscreenPlayerActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun showTrackInfoDialog(info: com.example.moniq.model.TrackInfo) {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 16, 24, 16)
+        }
+        
+        fun addInfoRow(label: String, value: String?) {
+            if (value.isNullOrBlank()) return
+            
+            val row = LinearLayout(this@FullscreenPlayerActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, 8, 0, 8)
+            }
+            
+            row.addView(TextView(this@FullscreenPlayerActivity).apply {
+                text = label
+                textSize = 12f
+                setTextColor(0xFF999999.toInt())
+            })
+            
+            row.addView(TextView(this@FullscreenPlayerActivity).apply {
+                text = value
+                textSize = 14f
+                setTextColor(0xFFFFFFFF.toInt())
+                setPadding(0, 4, 0, 0)
+            })
+            
+            container.addView(row)
+        }
+        
+        addInfoRow("Title", info.title)
+        addInfoRow("Artist", info.artists.joinToString(", ") { it.name })
+        addInfoRow("Album", info.album?.title)
+        
+        val minutes = info.duration / 60
+        val seconds = info.duration % 60
+        addInfoRow("Duration", String.format("%d:%02d", minutes, seconds))
+        
+        val qualityText = buildString {
+            when (info.audioQuality) {
+                "HI_RES_LOSSLESS", "HI_RES" -> append("Hi-Res Lossless")
+                "LOSSLESS" -> append("Lossless")
+                "HIGH" -> append("High Quality")
+                "LOW" -> append("Standard Quality")
+                else -> append(info.audioQuality.replace("_", " "))
+            }
+            
+            if (info.bitDepth != null || info.sampleRate != null) {
+                append(" (")
+                info.bitDepth?.let { append("${it}-bit") }
+                if (info.bitDepth != null && info.sampleRate != null) append(", ")
+                info.sampleRate?.let { append("${it/1000} kHz") }
+                append(")")
+            }
+            
+            if (info.audioModes.isNotEmpty()) {
+                append(" • ${info.audioModes.joinToString(", ")}")
+            }
+        }
+        addInfoRow("Audio Quality", qualityText)
+        
+        info.trackNumber?.let { 
+            addInfoRow("Track Number", "$it${info.volumeNumber?.let { v -> " (Disc $v)" } ?: ""}")
+        }
+        
+        if (info.bpm != null || info.key != null) {
+            val musicalInfo = buildString {
+                info.bpm?.let { append("$it BPM") }
+                info.key?.let { 
+                    if (isNotEmpty()) append(" • ")
+                    append(it)
+                    info.keyScale?.let { scale -> append(" ${scale.lowercase().replaceFirstChar { c -> c.uppercase() }}") }
+                }
+            }
+            addInfoRow("Musical Info", musicalInfo)
+        }
+        
+        info.popularity?.let { addInfoRow("Popularity", "$it%") }
+        
+        info.replayGain?.let { 
+            addInfoRow("Replay Gain", String.format("%.2f dB", it))
+        }
+        
+        addInfoRow("ISRC", info.isrc)
+        addInfoRow("Copyright", info.copyright)
+        
+        if (info.explicit) {
+            addInfoRow("Content", "Explicit")
+        }
+        
+        val scrollView = androidx.core.widget.NestedScrollView(this).apply {
+            addView(container)
+        }
+        
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle("Track Information")
+            .setView(scrollView)
+            .setPositiveButton("Close", null)
+            .show()
     }
 }

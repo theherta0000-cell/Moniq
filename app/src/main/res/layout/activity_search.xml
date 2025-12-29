@@ -140,41 +140,73 @@
 
             </LinearLayout>
 
-            <!-- Filter: All / Songs / Albums / Artists -->
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/searchFilterGroup"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                app:singleSelection="true"
-                app:chipSpacing="8dp">
+           <!-- Main Filter: All / Songs / Albums / Artists -->
+<com.google.android.material.chip.ChipGroup
+    android:id="@+id/searchFilterGroup"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="12dp"
+    app:singleSelection="true"
+    app:chipSpacing="8dp">
 
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipAll"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="All"
-                    android:checked="true" />
+    <com.google.android.material.chip.Chip
+        android:id="@+id/chipAll"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="All"
+        android:checked="true" />
 
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipSongs"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Songs" />
+    <com.google.android.material.chip.Chip
+        android:id="@+id/chipSongs"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Songs" />
 
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipAlbums"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Albums" />
+    <com.google.android.material.chip.Chip
+        android:id="@+id/chipAlbums"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Albums" />
 
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipArtists"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Artists" />
+    <com.google.android.material.chip.Chip
+        android:id="@+id/chipArtists"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Artists" />
 
-            </com.google.android.material.chip.ChipGroup>
+</com.google.android.material.chip.ChipGroup>
+
+<!-- Audio Format Filters (SEPARATE GROUP) -->
+<com.google.android.material.chip.ChipGroup
+    android:id="@+id/audioFormatChipGroup"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="12dp"
+    app:singleSelection="false"
+    app:chipSpacing="8dp">
+
+    <com.google.android.material.chip.Chip
+        android:id="@+id/chipAtmos"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Dolby Atmos"
+        android:checkable="true" />
+
+    <com.google.android.material.chip.Chip
+        android:id="@+id/chipLossless"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Lossless"
+        android:checkable="true" />
+
+    <com.google.android.material.chip.Chip
+        android:id="@+id/chipHiRes"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Hi-Res"
+        android:checkable="true" />
+
+</com.google.android.material.chip.ChipGroup>
 
             <!-- Songs Section (now first) -->
             <LinearLayout
@@ -284,15 +316,18 @@
                         android:tint="#D32F2F"
                         android:contentDescription="Error icon" />
 
-                    <TextView
-                        android:id="@+id/errorText"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Error occurred"
-                        android:textSize="16sp"
-                        android:textColor="#C62828"
-                        android:gravity="center"
-                        android:layout_marginTop="12dp" />
+                   <TextView
+    android:id="@+id/errorText"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:text="Error occurred"
+    android:textSize="14sp"
+    android:textColor="#C62828"
+    android:gravity="start"
+    android:layout_marginTop="12dp"
+    android:maxLines="10"
+    android:scrollbars="vertical"
+    android:fontFamily="monospace" />
 
                 </LinearLayout>
 

@@ -1,185 +1,351 @@
 package com.example.moniq.artist
 
-import com.example.moniq.SessionManager
+import android.util.Log
 import com.example.moniq.model.Album
-import com.example.moniq.network.OpenSubsonicApi
-import com.example.moniq.network.RetrofitClient
-import com.example.moniq.util.Crypto
+import com.example.moniq.model.Artist
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONObject
-import org.json.JSONArray
-import java.io.StringReader
+import com.example.moniq.util.ServerManager
+import java.net.URLEncoder
 
 class ArtistRepository {
-    suspend fun getArtistAlbums(artistId: String): List<Album> = withContext(Dispatchers.IO) {
-        val host = SessionManager.host ?: throw IllegalStateException("No host in session")
-        val username = SessionManager.username ?: throw IllegalStateException("No username in session")
-        val passwordRaw = SessionManager.password ?: throw IllegalStateException("No password in session")
-        val legacy = SessionManager.legacy
+    
+    
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+    
+    /**
+     * Search for artists by query string
+     */
+    suspend fun searchArtists(query: String): List<Artist> = withContext(Dispatchers.IO) {
+    val servers = ServerManager.getOrderedServers()
 
-        val base = normalizeBaseUrl(host)
-        val retrofit = RetrofitClient.create(base)
-        val api = retrofit.create(OpenSubsonicApi::class.java)
-        val pwParam = if (legacy) passwordRaw else Crypto.md5(passwordRaw)
-
-        val resp = api.getArtist(username, pwParam, artistId)
-        val body = resp.body() ?: ""
-
-        val albums = mutableListOf<Album>()
+    for (server in servers) {
         try {
-            val trimmed = body.trimStart()
-            if (trimmed.startsWith("{")) {
-                val root = JSONObject(body)
-                val sr = if (root.has("subsonic-response")) root.getJSONObject("subsonic-response") else root
+            val url = "$server/search/?q=${URLEncoder.encode(query, "UTF-8")}"
+            Log.d("ArtistRepository", "Searching artists from: $url")
 
-                // artist may contain album array
-                val artistObj = if (sr.has("artist")) sr.get("artist") else sr.opt("artist")
-                val albumContainer = when (artistObj) {
-                    is JSONObject -> artistObj
-                    else -> sr
-                }
+            val request = Request.Builder()
+    .url(url)
+    .addHeader("Accept", "*/*")
+    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0")
+    .addHeader("x-client", "BiniLossless/v3.3")  // 🔥 CRITICAL
+    .build()
 
-                val a = if (albumContainer.has("album")) albumContainer.get("album") else albumContainer.opt("album")
-                if (a is JSONArray) {
-    for (i in 0 until a.length()) {
-        val it = a.optJSONObject(i) ?: continue
-        val id = it.optString("id", "")
-        
-        // Fix: properly handle null/empty title and name fields
-        val titleRaw = if (it.has("title")) it.optString("title", null) else null
-        val nameRaw = if (it.has("name")) it.optString("name", null) else null
-        val name = when {
-            !titleRaw.isNullOrBlank() -> titleRaw
-            !nameRaw.isNullOrBlank() -> nameRaw
-            else -> "Unknown Album"
-        }
-        
-        val artist = it.optString("artist", "")
-        val year = it.optInt("year", -1).let { if (it <= 0) null else it }
-        val cover = it.optString("coverArt", null) ?: it.optString("coverArtId", null)
-        albums.add(Album(id, name, artist, year, cover))
-    }
-} else if (a is JSONObject) {
-    val it = a
-    val id = it.optString("id", "")
-    
-    // Fix: properly handle null/empty title and name fields
-    val titleRaw = if (it.has("title")) it.optString("title", null) else null
-    val nameRaw = if (it.has("name")) it.optString("name", null) else null
-    val name = when {
-        !titleRaw.isNullOrBlank() -> titleRaw
-        !nameRaw.isNullOrBlank() -> nameRaw
-        else -> "Unknown Album"
-    }
-    
-    val artist = it.optString("artist", "")
-    val year = it.optInt("year", -1).let { if (it <= 0) null else it }
-    val cover = it.optString("coverArt", null) ?: it.optString("coverArtId", null)
-    albums.add(Album(id, name, artist, year, cover))
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                ServerManager.recordFailure(server)
+                continue
+            }
+
+            val body = response.body?.string()
+if (body == null) {
+    ServerManager.recordFailure(server)
+    continue
 }
+
+            val artists = parseArtistSearch(body)
+            if (artists.isNotEmpty()) {
+                ServerManager.recordSuccess(server)
+                return@withContext artists
             } else {
-                val factory = XmlPullParserFactory.newInstance()
-                val parser = factory.newPullParser()
-                parser.setInput(StringReader(body))
-
-                var event = parser.eventType
-                while (event != XmlPullParser.END_DOCUMENT) {
-                    if (event == XmlPullParser.START_TAG && parser.name == "album") {
-                            val id = parser.getAttributeValue(null, "id") ?: ""
-                            val name = parser.getAttributeValue(null, "name") ?: ""
-                            val artist = parser.getAttributeValue(null, "artist") ?: ""
-                            val yearStr = parser.getAttributeValue(null, "year")
-                            val year = yearStr?.toIntOrNull()
-                            val cover = parser.getAttributeValue(null, "coverArt") ?: parser.getAttributeValue(null, "coverArtId")
-                            albums.add(Album(id, name, artist, year, cover))
-                        }
-                    event = parser.next()
-                }
+                ServerManager.recordFailure(server)
             }
-        } catch (_: Throwable) {
-        }
-
-        albums
-        // Fallback: if no albums found, try albumList2 with artistId
-            .let { result ->
-                if (result.isEmpty()) {
-                    try {
-                        val musicRepo = com.example.moniq.music.MusicRepository()
-                        // ask for albums by artist via albumList2
-                        val alt = musicRepo.getAlbumList2("byArtist", 50, artistId)
-                        if (alt.isNotEmpty()) return@withContext alt
-                    } catch (_: Throwable) {}
-                }
-                result
-            }
-    }
-
-    suspend fun getArtistInfo(artistId: String): Triple<String, String?, String?> = withContext(Dispatchers.IO) {
-        val host = SessionManager.host ?: throw IllegalStateException("No host in session")
-        val username = SessionManager.username ?: throw IllegalStateException("No username in session")
-        val passwordRaw = SessionManager.password ?: throw IllegalStateException("No password in session")
-        val legacy = SessionManager.legacy
-
-        val base = normalizeBaseUrl(host)
-        val retrofit = RetrofitClient.create(base)
-        val api = retrofit.create(OpenSubsonicApi::class.java)
-        val pwParam = if (legacy) passwordRaw else Crypto.md5(passwordRaw)
-
-        val resp = api.getArtistInfo(username, pwParam, artistId)
-        val body = resp.body() ?: ""
-
-        var name = ""
-        var biography: String? = null
-        var coverId: String? = null
-        try {
-    val trimmed = body.trimStart()
-    if (trimmed.startsWith("{")) {
-        // JSON parsing
-        val root = JSONObject(body)
-        val sr = if (root.has("subsonic-response")) root.getJSONObject("subsonic-response") else root
-        
-        val artistInfo = if (sr.has("artistInfo") || sr.has("artistInfo2")) {
-            sr.optJSONObject("artistInfo2") ?: sr.optJSONObject("artistInfo")
-        } else null
-        
-        if (artistInfo != null) {
-            name = artistInfo.optString("name", name)
-            biography = artistInfo.optString("biography", null)
-            coverId = artistInfo.optString("coverArt", null) ?: artistInfo.optString("coverArtId", null)
-        }
-    } else {
-        // XML parsing (fallback)
-        val factory = XmlPullParserFactory.newInstance()
-        val parser = factory.newPullParser()
-        parser.setInput(StringReader(body))
-
-        var event = parser.eventType
-            while (event != XmlPullParser.END_DOCUMENT) {
-            if (event == XmlPullParser.START_TAG && parser.name == "artist") {
-                name = parser.getAttributeValue(null, "name") ?: name
-                coverId = parser.getAttributeValue(null, "coverArt") ?: parser.getAttributeValue(null, "coverArtId") ?: coverId
-            }
-            if (event == XmlPullParser.START_TAG && parser.name == "biography") {
-                biography = parser.nextText()
-            }
-            event = parser.next()
+        } catch (e: Exception) {
+            ServerManager.recordFailure(server)
+            Log.w("ArtistRepository", "Failed on $server: ${e.message}")
         }
     }
-} catch (_: Throwable) {
+    emptyList()
 }
 
-        Triple(name, biography, coverId)
+    
+    /**
+     * Get albums for a specific artist by artist ID
+     */
+    suspend fun getArtistAlbums(artistId: String): List<Album> = withContext(Dispatchers.IO) {
+    val servers = ServerManager.getOrderedServers()
+
+    for (server in servers) {
+        try {
+            val url = "$server/artist/?f=$artistId"
+            val request = Request.Builder()
+    .url(url)
+    .addHeader("Accept", "*/*")
+    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0")
+    .addHeader("x-client", "BiniLossless/v3.3")  
+    .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                ServerManager.recordFailure(server)
+                continue
+            }
+
+            val body = response.body?.string()
+if (body == null) {
+    ServerManager.recordFailure(server)
+    continue
+}
+
+            val albums = parseArtistAlbums(body)
+            if (albums.isNotEmpty()) {
+                ServerManager.recordSuccess(server)
+                return@withContext albums
+            } else {
+                ServerManager.recordFailure(server)
+            }
+        } catch (e: Exception) {
+            ServerManager.recordFailure(server)
+            Log.e("ArtistRepository", "Error on $server", e)
+        }
+    }
+    emptyList()
+}
+
+    
+    /**
+     * Parse artist search results from JSON
+     */
+    private fun parseArtistSearch(body: String): List<Artist> {
+        val artists = mutableListOf<Artist>()
+        
+        try {
+            val root = JSONObject(body)
+            
+            // Try with data wrapper first (some endpoints might have it)
+            val data = root.optJSONObject("data") ?: root
+            val artistsData = data.optJSONObject("artists") ?: return artists
+            val rows = artistsData.optJSONArray("rows") ?: return artists
+            
+            for (i in 0 until rows.length()) {
+                val row = rows.optJSONObject(i) ?: continue
+                val modules = row.optJSONArray("modules") ?: continue
+                
+                for (j in 0 until modules.length()) {
+                    val module = modules.optJSONObject(j) ?: continue
+                    val pagedList = module.optJSONObject("pagedList") ?: continue
+                    val items = pagedList.optJSONArray("items") ?: continue
+                    
+                    for (k in 0 until items.length()) {
+                        val item = items.optJSONObject(k) ?: continue
+                        
+                        val artistId = item.optString("id", "")
+                        val artistName = item.optString("name", "Unknown Artist")
+                        val picture = item.optString("picture", null)
+                        
+                        if (artistId.isNotEmpty()) {
+                            artists.add(Artist(
+                                id = artistId,
+                                name = artistName,
+                                coverArtId = picture
+                            ))
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ArtistRepository", "Error parsing artist search", e)
+        }
+        
+        return artists
+    }
+    
+    /**
+     * Parse artist albums from JSON (for artist detail page)
+     * JSON structure: { "version": "2.0", "albums": {...}, "tracks": [...] }
+     */
+    private fun parseArtistAlbums(body: String): List<Album> {
+        val albums = mutableListOf<Album>()
+        
+        try {
+            val root = JSONObject(body)
+            
+            // Albums are at root level, not under "data"
+            val albumsData = root.optJSONObject("albums")
+            if (albumsData == null) {
+                Log.w("ArtistRepository", "No 'albums' object found in JSON")
+                return albums
+            }
+            
+            val rows = albumsData.optJSONArray("rows")
+            if (rows == null) {
+                Log.w("ArtistRepository", "No 'rows' array found in albums")
+                return albums
+            }
+            
+            if (rows.length() > 0) {
+                val firstRow = rows.optJSONObject(0)
+                if (firstRow == null) {
+                    Log.w("ArtistRepository", "First row is null")
+                    return albums
+                }
+                
+                val modules = firstRow.optJSONArray("modules")
+                if (modules == null) {
+                    Log.w("ArtistRepository", "No 'modules' array found")
+                    return albums
+                }
+                
+                if (modules.length() > 0) {
+                    val module = modules.optJSONObject(0)
+                    if (module == null) {
+                        Log.w("ArtistRepository", "First module is null")
+                        return albums
+                    }
+                    
+                    val pagedList = module.optJSONObject("pagedList")
+                    if (pagedList == null) {
+                        Log.w("ArtistRepository", "No 'pagedList' object found")
+                        return albums
+                    }
+                    
+                    val items = pagedList.optJSONArray("items")
+                    if (items == null) {
+                        Log.w("ArtistRepository", "No 'items' array found")
+                        return albums
+                    }
+                    
+                    Log.d("ArtistRepository", "Found ${items.length()} album items")
+                    
+                    for (i in 0 until items.length()) {
+                        val item = items.optJSONObject(i) ?: continue
+                        
+                        val albumId = item.optString("id", "")
+                        val title = item.optString("title", "Unknown Album")
+                        val cover = item.optString("cover", null)
+                        val releaseDate = item.optString("releaseDate", null)
+                        
+                        // Parse artist
+                        val artistsArray = item.optJSONArray("artists")
+                        val artistName = if (artistsArray != null && artistsArray.length() > 0) {
+                            artistsArray.optJSONObject(0)?.optString("name", "Unknown Artist") ?: "Unknown Artist"
+                        } else "Unknown Artist"
+                        
+                        // Extract year
+                        val year = releaseDate?.take(4)?.toIntOrNull()
+                        
+                        Log.d("ArtistRepository", "Parsed album: $title by $artistName (ID: $albumId)")
+                        
+                        albums.add(Album(
+                            id = albumId,
+                            name = title,
+                            artist = artistName,
+                            year = year,
+                            coverArtId = cover
+                        ))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ArtistRepository", "Error parsing artist albums", e)
+        }
+        
+        return albums
+    }
+    
+    /**
+     * Fetch artist image bytes from cover art ID
+     */
+    suspend fun fetchArtistImage(coverArtId: String): ByteArray? = withContext(Dispatchers.IO) {
+    for (server in ServerManager.getOrderedServers()) {
+        try {
+            val url = "$server/image/$coverArtId"
+            val request = Request.Builder().url(url).build()
+            val response = client.newCall(request).execute()
+
+            if (response.isSuccessful) {
+                response.body?.bytes()?.let {
+                    ServerManager.recordSuccess(server)
+                    return@withContext it
+                }
+            }
+
+            ServerManager.recordFailure(server)
+        } catch (e: Exception) {
+            ServerManager.recordFailure(server)
+        }
+    }
+    null
+}
+
+    
+    /**
+     * Get artist info (name, biography, cover)
+     * Extracts from the first album's artist data
+     */
+    suspend fun getArtistInfo(
+    artistId: String
+): Triple<String, String?, String?> = withContext(Dispatchers.IO) {
+
+    val servers = ServerManager.getOrderedServers()
+
+    for (server in servers) {
+        try {
+            val url = "$server/artist/?f=$artistId"
+            val request = Request.Builder()
+    .url(url)
+    .addHeader("Accept", "*/*")
+    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0")
+    .addHeader("x-client", "BiniLossless/v3.3")  // 🔥 CRITICAL
+    .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                ServerManager.recordFailure(server)
+                continue
+            }
+
+            val body = response.body?.string()
+if (body == null) {
+    ServerManager.recordFailure(server)
+    continue
+}
+
+
+            val root = JSONObject(body)
+            val albumsData = root.optJSONObject("albums") ?: continue
+            val rows = albumsData.optJSONArray("rows") ?: continue
+
+            if (rows.length() > 0) {
+                val firstRow = rows.optJSONObject(0) ?: continue
+                val modules = firstRow.optJSONArray("modules") ?: continue
+
+                if (modules.length() > 0) {
+                    val module = modules.optJSONObject(0) ?: continue
+                    val pagedList = module.optJSONObject("pagedList") ?: continue
+                    val items = pagedList.optJSONArray("items") ?: continue
+
+                    if (items.length() > 0) {
+                        val firstAlbum = items.optJSONObject(0) ?: continue
+                        val artistsArray = firstAlbum.optJSONArray("artists")
+
+                        if (artistsArray != null && artistsArray.length() > 0) {
+                            val artistObj = artistsArray.optJSONObject(0)
+                            val name = artistObj?.optString("name", "Unknown Artist") ?: "Unknown Artist"
+                            val picture = artistObj?.optString("picture", null)
+
+                            ServerManager.recordSuccess(server)
+                            return@withContext Triple(name, null, picture)
+                        }
+                    }
+                }
+            }
+
+            ServerManager.recordFailure(server)
+
+        } catch (e: Exception) {
+            ServerManager.recordFailure(server)
+            Log.w("ArtistRepository", "Failed on $server", e)
+        }
     }
 
-    private fun normalizeBaseUrl(host: String): String {
-        var h = host.trim()
-        if (!h.startsWith("http://") && !h.startsWith("https://")) {
-            h = "https://$h"
-        }
-        if (!h.endsWith("/")) h += "/"
-        return h
-    }
+    Triple("Unknown Artist", null, null)
+}
+
 }
