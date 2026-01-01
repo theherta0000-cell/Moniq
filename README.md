@@ -1,4 +1,4 @@
-![Homepage](Homepage.jpg) ![Search Results](Search.jpg) ![Album Page](AlbumView.jpg) ![Artist Page](ArtistView.jpg) ![Fullscreen Player](FullscreenPlayer.jpg) ![Lyrics](LYRICS.jpg)
+![Homepage](Homepage.jpg) ![Playlist View](PlaylistView.jpg) ![Search Results](Search.jpg) ![Album Page](AlbumView.jpg) ![Artist Page](ArtistView.jpg) ![Fullscreen Player](FullscreenPlayer.jpg) ![Lyrics](LYRICS.jpg)
 This is of version 1.3.0. **UI is subject to change and has changed since this version.**
 
 Moniq, an Android solution to streaming.
