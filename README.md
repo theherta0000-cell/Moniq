@@ -1,5 +1,5 @@
 ![Homepage](Homepage.jpg) ![Playlist View](PlaylistView.jpg) ![Search Results](Search.jpg) ![Album Page](AlbumView.jpg) ![Artist Page](ArtistView.jpg) ![Fullscreen Player](FullscreenPlayer.jpg) ![Lyrics](LYRICS.jpg)
-This is of version [1.5.7](https://github.com/theherta0000-cell/Moniq/releases/tag/v1.5.7). **UI is subject to change but has not changed since this version**
+This is of version [1.5.7](https://github.com/theherta0000-cell/Moniq/releases/tag/v1.5.7). **UI is subject to change but has not changed since this version.**
 
 Moniq, an Android solution to streaming.
 Moniq no longer supports OpenSubsonic streaming. However, you can still download the fully functional latest version that supported it from [here (1.4.0)](https://github.com/theherta0000-cell/Moniq/releases/tag/v1.4.0).
